@@ -10,7 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Layered Architecture Design
 The project follows a layered architecture pattern:
-- **API Layer**: Axum-based HTTP server with unified `/chat` endpoint
+- **API Layer**: Axum-based HTTP server with `/auth` and `/chat` endpoints
+- **Auth Layer**: API Key-based authentication with external validation service
 - **Agent Layer**: Abstraction over different AI providers (Qwen, Ollama)
 - **Core Layer**: Built on top of `rig-core` LLM framework
 - **Configuration Layer**: Environment-based configuration management
@@ -18,8 +19,11 @@ The project follows a layered architecture pattern:
 ### Core Components
 
 - **`src/main.rs`**: Application entry point with server initialization
-- **`src/server/chat.rs`**: Main chat handler and request routing logic
-- **`src/server/models.rs`**: Data structures for requests/responses
+- **`src/server/chat.rs`**: Chat and auth handlers with request routing logic
+- **`src/server/models.rs`**: Data structures for requests/responses including auth models
+- **`src/server/auth/`**: Authentication module with external API validation
+  - `client.rs`: HTTP client for external auth service integration
+  - `utils.rs`: Common auth utilities and response formatting
 - **`src/server/agent/`**: AI provider implementations (Qwen, Ollama)
 - **`rig/rig-core/`**: Local dependency for LLM framework (version 0.21.0)
 
@@ -64,6 +68,10 @@ chmod +x test_unified_chat.sh
 # Test individual endpoints
 chmod +x test_chat_api.sh
 ./test_chat_api.sh
+
+# Test authentication (requires API key)
+curl -X POST http://localhost:3000/auth \
+  -H "Authorization: Bearer your_api_key_here"
 ```
 
 ## Configuration Requirements
@@ -76,6 +84,9 @@ Create a `.env` file based on `.env.example`:
 SERVER_HOST=127.0.0.1
 SERVER_PORT=3000
 RUST_LOG=info
+
+# Authentication service (optional, defaults to https://api.topmaterial-tech.com)
+AUTH_API_URL=https://api.topmaterial-tech.com
 
 # Required for Qwen models
 DASHSCOPE_API_KEY=your_dashscope_api_key_here

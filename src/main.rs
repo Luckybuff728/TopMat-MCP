@@ -19,6 +19,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("启动TopMat LLM 服务...");
 
+    // 初始化数据库
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| server::database::connection::get_default_database_url());
+
+    tracing::info!("初始化数据库: {}", database_url);
+    let _database_connection = server::database::init_database(&database_url).await?;
+    tracing::info!("数据库初始化完成");
+
     // 读取服务器配置
     let host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = std::env::var("SERVER_PORT")
@@ -27,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(3000);
 
     // 创建路由
-    let app = server::create_server();
+    let app = server::create_server(_database_connection).await;
 
     // 配置地址
     let addr_str = format!("{}:{}", host, port);

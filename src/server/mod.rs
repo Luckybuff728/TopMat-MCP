@@ -1,6 +1,13 @@
-pub mod chat;
-pub mod models;
 pub mod agent;
-pub mod request;
+pub mod auth;
+pub mod handlers;
+pub mod responses;
+pub mod routing;
+pub mod model_router;
+pub mod database;
+pub mod middleware;
 
-pub use chat::create_server;
+pub mod models;
+pub mod request;
+pub mod server;
+pub use server::create_server;

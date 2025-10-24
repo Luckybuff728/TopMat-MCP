@@ -34,7 +34,7 @@ fn default_model() -> String {
 }
 
 /// 聊天响应结构（非流式）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatResponse {
     /// 响应内容
     pub content: String,
@@ -54,11 +54,11 @@ pub struct ChatResponse {
 }
 
 /// Token使用情况
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TokenUsage {
     /// 提示词token数
     pub prompt_tokens: u32,
-    /// 完成token数
+    /// 补全token数
     pub completion_tokens: u32,
     /// 总token数
     pub total_tokens: u32,
@@ -117,4 +117,353 @@ pub struct ErrorResponse {
     pub details: Option<serde_json::Value>,
     /// 时间戳
     pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+// ============== 鉴权相关数据结构 ==============
+
+/// 用户信息结构
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UserInfo {
+    /// 用户ID
+    pub id: u32,
+    /// 用户名
+    pub username: String,
+    /// 邮箱
+    pub email: String,
+    /// 订阅级别
+    pub subscription_level: String,
+    /// 订阅过期时间
+    pub subscription_expires_at: String,
+}
+
+/// API Key信息响应结构
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ApiKeyInfo {
+    /// API Key
+    pub api_key: String,
+    /// 创建时间
+    pub created_at: String,
+    /// 过期时间
+    pub expires_at: String,
+    /// ID
+    pub id: u32,
+    /// 是否激活
+    pub is_active: bool,
+    /// Key名称
+    pub key_name: String,
+    /// 最后使用时间
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    /// 用户信息
+    pub user: UserInfo,
+}
+
+/// 鉴权结果
+#[derive(Debug, Clone)]
+pub struct AuthResult {
+    /// API Key信息
+    pub api_key_info: ApiKeyInfo,
+    /// 用户信息
+    pub user_info: UserInfo,
+}
+
+/// 鉴权客户端错误类型
+#[derive(Debug)]
+pub enum AuthError {
+    /// 网络请求失败
+    RequestError(String),
+    /// HTTP状态码错误
+    HttpError(u16),
+    /// JSON解析失败
+    JsonError(String),
+    /// API Key无效
+    InvalidApiKey,
+    /// API Key已过期
+    ExpiredApiKey,
+    /// API Key未激活
+    InactiveApiKey,
+    /// 订阅已过期
+    SubscriptionExpired,
+    /// 缓存已过期
+    CacheExpired,
+    /// 数据库错误
+    DatabaseError(String),
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthError::RequestError(msg) => write!(f, "请求失败: {}", msg),
+            AuthError::HttpError(status) => write!(f, "HTTP错误: {}", status),
+            AuthError::JsonError(msg) => write!(f, "JSON解析失败: {}", msg),
+            AuthError::InvalidApiKey => write!(f, "无效的API Key"),
+            AuthError::ExpiredApiKey => write!(f, "API Key已过期"),
+            AuthError::InactiveApiKey => write!(f, "API Key未激活"),
+            AuthError::SubscriptionExpired => write!(f, "用户订阅已过期"),
+            AuthError::CacheExpired => write!(f, "缓存已过期"),
+            AuthError::DatabaseError(msg) => write!(f, "数据库错误: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for AuthError {}
+
+// ============== 对话历史管理相关 ==============
+
+/// 对话信息
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Conversation {
+    /// 对话ID
+    pub id: Option<i32>,
+    /// 用户ID
+    pub user_id: i32,
+    /// 会话ID
+    pub session_id: Option<String>,
+    /// 对话标题
+    pub title: Option<String>,
+    /// 使用的AI模型
+    pub model: String,
+    /// 消息数量
+    pub message_count: Option<i32>,
+    /// 聊天总结
+    pub summary: Option<String>,
+    /// 创建时间
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 更新时间
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 消息信息
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Message {
+    /// 消息ID
+    pub id: Option<i32>,
+    /// 对话ID
+    pub conversation_id: i32,
+    /// 角色 (user/assistant/system)
+    pub role: String,
+    /// 消息内容
+    pub content: String,
+    /// 使用的AI模型 (仅assistant角色时)
+    pub model: Option<String>,
+    /// Token使用情况
+    pub usage: Option<TokenUsage>,
+    /// 元数据
+    pub metadata: Option<serde_json::Value>,
+    /// 创建时间
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 创建对话请求
+#[derive(Debug, Deserialize)]
+pub struct CreateConversationRequest {
+    /// 会话ID (可选)
+    pub session_id: Option<String>,
+    /// 对话标题 (可选)
+    pub title: Option<String>,
+    /// 系统提示词 (可选)
+    pub system_prompt: Option<String>,
+    /// 初始消息 (可选)
+    pub initial_message: Option<String>,
+}
+
+/// 对话列表查询参数
+#[derive(Debug, Deserialize)]
+pub struct ListConversationsQuery {
+    /// 分页大小，默认20，最大100
+    #[serde(default = "default_page_size")]
+    pub limit: i64,
+    /// 偏移量，默认0
+    #[serde(default = "default_offset")]
+    pub offset: i64,
+    /// 按会话ID筛选
+    pub session_id: Option<String>,
+    /// 搜索关键词
+    pub search: Option<String>,
+}
+
+fn default_page_size() -> i64 {
+    20
+}
+
+fn default_offset() -> i64 {
+    0
+}
+
+/// 对话列表响应
+#[derive(Debug, Serialize)]
+pub struct ConversationListResponse {
+    /// 对话列表
+    pub conversations: Vec<Conversation>,
+    /// 总数量
+    pub total: i64,
+    /// 当前页码
+    pub page: i64,
+    /// 每页大小
+    pub page_size: i64,
+    /// 总页数
+    pub total_pages: i64,
+}
+
+/// 消息列表查询参数
+#[derive(Debug, Deserialize)]
+pub struct ListMessagesQuery {
+    /// 分页大小，默认50，最大100
+    #[serde(default = "default_message_page_size")]
+    pub limit: i64,
+    /// 偏移量，默认0
+    #[serde(default = "default_message_offset")]
+    pub offset: i64,
+    /// 获取指定消息ID之前的消息
+    pub before: Option<i32>,
+}
+
+fn default_message_page_size() -> i64 {
+    50
+}
+
+fn default_message_offset() -> i64 {
+    0
+}
+
+/// 消息列表响应
+#[derive(Debug, Serialize)]
+pub struct MessageListResponse {
+    /// 消息列表
+    pub messages: Vec<Message>,
+    /// 对话ID
+    pub conversation_id: i32,
+    /// 总数量
+    pub total: i64,
+    /// 当前页码
+    pub page: i64,
+    /// 每页大小
+    pub page_size: i64,
+    /// 总页数
+    pub total_pages: i64,
+    /// 是否还有更多消息
+    pub has_more: bool,
+}
+
+/// 创建对话响应
+#[derive(Debug, Serialize)]
+pub struct CreateConversationResponse {
+    /// 对话信息
+    pub conversation: Conversation,
+    /// 第一个消息（如果有初始消息）
+    pub first_message: Option<Message>,
+}
+
+/// 更新对话标题请求
+#[derive(Debug, Deserialize)]
+pub struct UpdateConversationTitleRequest {
+    /// 新标题
+    pub title: String,
+}
+
+// ============== 使用统计相关数据结构 ==============
+
+/// 使用统计查询参数
+#[derive(Debug, Deserialize)]
+pub struct UsageStatsQuery {
+    /// 开始日期 (ISO 8601格式)
+    pub from_date: Option<String>,
+    /// 结束日期 (ISO 8601格式)
+    pub to_date: Option<String>,
+    /// 统计周期 (day/week/month)
+    pub period: Option<String>,
+}
+
+/// 使用统计数据
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UsageStats {
+    /// 模型名称
+    pub model: String,
+    /// 请求次数
+    pub requests: u64,
+    /// Token使用量
+    pub tokens: u64,
+    /// 成本（美元）
+    pub cost: f64,
+}
+
+/// 详细使用统计响应
+#[derive(Debug, Serialize)]
+pub struct UsageStatsResponse {
+    /// 统计周期
+    pub period: String,
+    /// 开始时间
+    pub from_date: String,
+    /// 结束时间
+    pub to_date: String,
+    /// 统计数据
+    pub stats: DetailedUsageStats,
+}
+
+/// 详细使用统计
+#[derive(Debug, Serialize)]
+pub struct DetailedUsageStats {
+    /// 总请求数
+    pub total_requests: u64,
+    /// 总Token数
+    pub total_tokens: u64,
+    /// 总成本
+    pub total_cost: f64,
+    /// 平均响应时间（毫秒）
+    pub avg_response_time_ms: f64,
+    /// 各模型使用情况
+    pub model_usage: std::collections::HashMap<String, UsageStats>,
+}
+
+// ============== 健康检查相关数据结构 ==============
+
+/// 服务健康状态
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceStatus {
+    /// 健康
+    Healthy,
+    /// 不健康
+    Unhealthy,
+    /// 未知
+    Unknown,
+}
+
+/// 健康检查响应
+#[derive(Debug, Serialize)]
+pub struct HealthCheckResponse {
+    /// 整体状态
+    pub status: ServiceStatus,
+    /// 检查时间
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// 版本号
+    pub version: String,
+    /// 各服务状态
+    pub services: ServicesStatus,
+}
+
+/// 服务状态详情
+#[derive(Debug, Serialize)]
+pub struct ServicesStatus {
+    /// 数据库状态
+    pub database: ServiceStatus,
+    /// 缓存状态
+    pub cache: ServiceStatus,
+    /// AI模型状态
+    pub ai_models: std::collections::HashMap<String, ServiceStatus>,
+}
+
+/// 模型健康信息
+#[derive(Debug, Serialize)]
+pub struct ModelHealth {
+    /// 模型名称
+    pub name: String,
+    /// 状态
+    pub status: ServiceStatus,
+    /// 最后检查时间
+    pub last_checked: chrono::DateTime<chrono::Utc>,
+    /// 响应时间（毫秒）
+    pub response_time_ms: Option<u64>,
+    /// 错误信息（如果有）
+    pub error: Option<String>,
 }
