@@ -1,12 +1,13 @@
 use rig::prelude::*;
+use rig::client::{ProviderClient, CompletionClient};
 
 use crate::server::models::*;
 use crate::server::request::{handle_normal_request, handle_streaming_request};
 
-/// 处理通义千问请求
+/// 处理通义千问请求并返回ChatResponse (qwen-plus)
 pub async fn qwen_plus(
     request: ChatRequest,
-) -> Result<axum::response::Response, ErrorResponse> {
+) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let model = &request.model;
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.5);
@@ -17,31 +18,16 @@ pub async fn qwen_plus(
         .build();
 
     if request.stream {
-        handle_qwen_streaming(agent, request).await
+        handle_streaming_request(agent, request).await
     } else {
-        handle_qwen_normal(agent, request).await
+        handle_normal_request(agent, request, "通义千问").await
     }
 }
 
-pub async fn qwen_max(
-    request: ChatRequest,
-) -> Result<axum::response::Response, ErrorResponse> {
-    let agent = rig::providers::qwen::Client::from_env()
-        .agent("qwen-max")
-        .preamble("")
-        .temperature(0.8)
-        .build();
-
-    if request.stream {
-        handle_qwen_streaming(agent, request).await
-    } else {
-        handle_qwen_normal(agent, request).await
-    }
-}
-
+/// 处理通义千问请求并返回ChatResponse (qwen-turbo)
 pub async fn qwen_turbo(
     request: ChatRequest,
-) -> Result<axum::response::Response, ErrorResponse> {
+) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let agent = rig::providers::qwen::Client::from_env()
         .agent("qwen-turbo")
         .preamble("")
@@ -49,15 +35,33 @@ pub async fn qwen_turbo(
         .build();
 
     if request.stream {
-        handle_qwen_streaming(agent, request).await
+        handle_streaming_request(agent, request).await
     } else {
-        handle_qwen_normal(agent, request).await
+        handle_normal_request(agent, request, "通义千问").await
     }
 }
 
+/// 处理通义千问请求并返回ChatResponse (qwen-max)
+pub async fn qwen_max(
+    request: ChatRequest,
+) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
+    let agent = rig::providers::qwen::Client::from_env()
+        .agent("qwen-max")
+        .preamble("")
+        .temperature(0.8)
+        .build();
+
+    if request.stream {
+        handle_streaming_request(agent, request).await
+    } else {
+        handle_normal_request(agent, request, "通义千问").await
+    }
+}
+
+/// 处理通义千问请求并返回ChatResponse (qwen-flash)
 pub async fn qwen_flash(
     request: ChatRequest,
-) -> Result<axum::response::Response, ErrorResponse> {
+) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let agent = rig::providers::qwen::Client::from_env()
         .agent("qwen-flash")
         .preamble("")
@@ -65,14 +69,16 @@ pub async fn qwen_flash(
         .build();
 
     if request.stream {
-        handle_qwen_streaming(agent, request).await
+        handle_streaming_request(agent, request).await
     } else {
-        handle_qwen_normal(agent, request).await
+        handle_normal_request(agent, request, "通义千问").await
     }
 }
+
+/// 处理通义千问请求并返回ChatResponse (qwq-plus)
 pub async fn qwq_plus(
     request: ChatRequest,
-) -> Result<axum::response::Response, ErrorResponse> {
+) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let agent = rig::providers::qwen::Client::from_env()
         .agent("qwq-plus")
         .preamble("")
@@ -80,17 +86,20 @@ pub async fn qwq_plus(
         .build();
 
     if request.stream {
-        handle_qwen_streaming(agent, request).await
+        handle_streaming_request(agent, request).await
     } else {
-        handle_qwen_normal(agent, request).await
+        handle_normal_request(agent, request, "通义千问").await
     }
 }
+
+
 /// 处理通义千问非流式请求
 pub async fn handle_qwen_normal(
     agent: rig::agent::Agent<rig::providers::qwen::CompletionModel>,
     request: ChatRequest,
 ) -> Result<axum::response::Response, ErrorResponse> {
-    handle_normal_request(agent, request, "通义千问").await
+    let (response, _) = handle_normal_request(agent, request, "通义千问").await?;
+    Ok(response)
 }
 
 /// 处理通义千问流式请求
@@ -98,5 +107,6 @@ pub async fn handle_qwen_streaming(
     agent: rig::agent::Agent<rig::providers::qwen::CompletionModel>,
     request: ChatRequest,
 ) -> Result<axum::response::Response, ErrorResponse> {
-    handle_streaming_request(agent, request).await
+    let (response, _) = handle_streaming_request(agent, request).await?;
+    Ok(response)
 }

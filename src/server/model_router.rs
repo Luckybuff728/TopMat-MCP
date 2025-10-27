@@ -8,7 +8,8 @@ pub struct ModelRouter {
     handlers: HashMap<String, HandlerFn>,
 }
 
-type HandlerFn = fn(ChatRequest) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<axum::response::Response, ErrorResponse>> + Send>>;
+/// 处理器函数类型，返回(Response, ChatResponse)
+type HandlerFn = fn(ChatRequest) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(axum::response::Response, ChatResponse), ErrorResponse>> + Send>>;
 
 impl ModelRouter {
     /// 创建新的模型路由器
@@ -36,8 +37,8 @@ impl ModelRouter {
         self.handlers.insert(model_name.to_string(), handler);
     }
 
-    /// 处理聊天请求
-    pub async fn handle_chat_request(&self, request: ChatRequest) -> Result<axum::response::Response, ErrorResponse> {
+    /// 处理聊天请求并返回ChatResponse用于保存助手消息
+    pub async fn handle_chat_request_with_response(&self, request: ChatRequest) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
         let handler = self.handlers.get(&request.model)
             .ok_or_else(|| ErrorResponse {
                 error: "model_not_supported".to_string(),

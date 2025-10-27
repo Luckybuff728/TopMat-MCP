@@ -19,17 +19,17 @@ pub async fn list_messages_handler(
 
     // 构建基本查询SQL
     let mut sql = String::from(
-        "SELECT id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
+        "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
          FROM messages WHERE conversation_id = ?"
     );
 
     // 添加消息ID过滤（如果指定了before参数）
     if let Some(before_id) = params.before {
-        sql.push_str(" AND id < ?");
+        sql.push_str(" AND message_id < ?");
     }
 
     // 添加排序和分页
-    sql.push_str(" ORDER BY created_at ASC, id ASC LIMIT ? OFFSET ?");
+    sql.push_str(" ORDER BY created_at ASC, message_id ASC LIMIT ? OFFSET ?");
 
     // 执行查询
     let mut query = sqlx::query(&sql);
@@ -132,8 +132,8 @@ pub async fn get_message_handler(
     info!("获取消息详情: conversation_id={}, message_id={}",
           conversation_id, message_id);
 
-    let sql = "SELECT id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
-              FROM messages WHERE id = ? AND conversation_id = ?";
+    let sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
+              FROM messages WHERE message_id = ? AND conversation_id = ?";
 
     let row = sqlx::query(sql)
         .bind(message_id as i64)
@@ -186,7 +186,7 @@ pub async fn delete_message_handler(
     info!("删除消息: conversation_id={}, message_id={}",
           conversation_id, message_id);
 
-    let sql = "DELETE FROM messages WHERE id = ? AND conversation_id = ?";
+    let sql = "DELETE FROM messages WHERE message_id = ? AND conversation_id = ?";
 
     let result = sqlx::query(sql)
         .bind(message_id as i64)

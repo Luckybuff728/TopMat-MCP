@@ -108,10 +108,20 @@ impl AuthMiddleware {
 
         // 将用户信息注入到请求扩展中
         let mut request = request;
-        request.extensions_mut().insert(auth_user);
+        request.extensions_mut().insert(auth_user.clone());
 
         // 继续处理请求
-        let response = next.run(request).await;
+        let mut response = next.run(request).await;
+
+        // 在响应头中添加用户ID，供其他中间件使用
+        response.headers_mut().insert(
+            "X-User-ID",
+            auth_user.user_id.to_string().parse().unwrap_or_else(|_| {
+                warn!("Failed to parse user ID as header value");
+                axum::http::HeaderValue::from_static("1")
+            })
+        );
+
         Ok(response)
     }
 

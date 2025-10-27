@@ -21,9 +21,9 @@ pub struct ChatRequest {
     /// 最大token数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
-    /// 会话ID（用于多轮对话）
+    /// 会话ID（用于多轮对话，可选）
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub conversation_id: Option<i64>,
     /// 额外的元数据
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, serde_json::Value>,
@@ -44,8 +44,7 @@ pub struct ChatResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
     /// 会话ID
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub conversation_id: i64,
     /// 响应时间戳
     pub timestamp: chrono::DateTime<chrono::Utc>,
     /// 额外的元数据
@@ -65,7 +64,7 @@ pub struct TokenUsage {
 }
 
 /// 流式响应的数据块
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StreamChunk {
     /// 文本内容块
@@ -217,9 +216,7 @@ pub struct Conversation {
     pub id: Option<i32>,
     /// 用户ID
     pub user_id: i32,
-    /// 会话ID
-    pub session_id: Option<String>,
-    /// 对话标题
+        /// 对话标题
     pub title: Option<String>,
     /// 使用的AI模型
     pub model: String,
@@ -257,8 +254,8 @@ pub struct Message {
 /// 创建对话请求
 #[derive(Debug, Deserialize)]
 pub struct CreateConversationRequest {
-    /// 会话ID (可选)
-    pub session_id: Option<String>,
+    /// 会话ID
+    pub conversation_id: Option<i64>,
     /// 对话标题 (可选)
     pub title: Option<String>,
     /// 系统提示词 (可选)
@@ -276,8 +273,8 @@ pub struct ListConversationsQuery {
     /// 偏移量，默认0
     #[serde(default = "default_offset")]
     pub offset: i64,
-    /// 按会话ID筛选
-    pub session_id: Option<String>,
+    /// 按会话ID筛选（可选）
+    pub conversation_id: Option<i64>,
     /// 搜索关键词
     pub search: Option<String>,
 }

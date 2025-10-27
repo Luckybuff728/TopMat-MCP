@@ -16,7 +16,7 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
     agent: rig::agent::Agent<M>,
     request: ChatRequest,
     model_name: &str,
-) -> Result<Response, ErrorResponse> {
+) -> Result<(Response, ChatResponse), ErrorResponse> {
     // 使用流式API来获取完整的使用统计，即使是非流式请求
     let mut stream = agent.stream_prompt(&request.message).await;
     let mut content = String::new();
@@ -48,11 +48,11 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
                     content: response,
                     model: request.model,
                     usage: None,
-                    session_id: request.session_id,
+                    conversation_id: request.conversation_id.expect("REASON"),
                     timestamp: chrono::Utc::now(),
                     metadata: HashMap::new(),
                 };
-                Ok(Json(chat_response).into_response())
+                Ok((Json(chat_response.clone()).into_response(), chat_response))
             }
             Err(e) => {
                 error!("{} 聊天处理失败: {}", model_name, e);
@@ -79,34 +79,38 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
             content,
             model: request.model,
             usage,
-            session_id: request.session_id,
+            conversation_id: request.conversation_id.expect("REASON"),
             timestamp: chrono::Utc::now(),
             metadata: HashMap::new(),
         };
-        Ok(Json(chat_response).into_response())
+        Ok((Json(chat_response.clone()).into_response(), chat_response))
     }
 }
 
-/// 通用的流式请求处理函数
 pub async fn handle_streaming_request<M: rig::completion::CompletionModel + Send + Sync + 'static>(
     agent: rig::agent::Agent<M>,
     request: ChatRequest,
-) -> Result<Response, ErrorResponse>
+) -> Result<(Response, ChatResponse), ErrorResponse>
 where
     <M as rig::completion::CompletionModel>::StreamingResponse: Send + Sync + 'static,
 {
     let mut stream = agent.stream_prompt(&request.message).await;
-
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(100);
+
+    // 用于收集完整响应内容的变量
+    let mut full_content = String::new();
+    let mut final_chat_response: Option<ChatResponse> = None;
 
     // 启动后台任务处理流
     let request_clone = request.clone();
+    let (content_tx, content_rx) = tokio::sync::oneshot::channel();
+
     tokio::spawn(async move {
         while let Some(item) = stream.next().await {
             match item {
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::Text(text))) => {
                     let chunk = StreamChunk::Text {
-                        text: text.text,
+                        text: text.text.clone(),
                         finished: false,
                     };
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
@@ -137,13 +141,18 @@ where
                             completion_tokens: usage.output_tokens as u32,
                             total_tokens: usage.total_tokens as u32,
                         }),
-                        session_id: request_clone.session_id.clone(),
+                        conversation_id: request_clone.conversation_id.clone().expect("REASON"),
                         timestamp: chrono::Utc::now(),
                         metadata: HashMap::new(),
                     };
-                    let chunk = StreamChunk::Final { response: chat_response };
+
+                    // 发送最终响应
+                    let chunk = StreamChunk::Final { response: chat_response.clone() };
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
                     let _ = tx.send(Ok(Event::default().data(event_data))).await;
+
+                    // 发送完整的ChatResponse给主函数
+                    let _ = content_tx.send(chat_response);
                     break;
                 }
                 Err(e) => {
@@ -164,5 +173,21 @@ where
                 .text("keepalive-text"),
         );
 
-    Ok(sse_response.into_response())
+    // 等待获取完整的ChatResponse
+    let chat_response = match content_rx.await {
+        Ok(response) => response,
+        Err(_) => {
+            // 如果没有收到完整响应，创建一个基本的响应
+            ChatResponse {
+                content: String::new(),
+                model: request.model,
+                usage: None,
+                conversation_id: request.conversation_id.expect("REASON"),
+                timestamp: chrono::Utc::now(),
+                metadata: HashMap::new(),
+            }
+        }
+    };
+
+    Ok((sse_response.into_response(), chat_response))
 }

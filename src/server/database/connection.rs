@@ -108,9 +108,8 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            session_id TEXT,
             title TEXT,
             model TEXT NOT NULL,
             message_count INTEGER DEFAULT 0,
@@ -128,7 +127,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id INTEGER NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -138,7 +137,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             total_tokens INTEGER,
             metadata TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (conversation_id) REFERENCES conversations (id)
+            FOREIGN KEY (conversation_id) REFERENCES conversations (conversation_id)
         )
         "#,
     )
@@ -176,10 +175,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_conversations_session_id ON conversations (session_id)")
-        .execute(pool)
-        .await?;
-
+    
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)")
         .execute(pool)
         .await?;
