@@ -48,10 +48,9 @@ pub fn create_protected_routes() -> Router<ServerState> {
         .route("/v1/conversations/:id", delete(delete_conversation_handler))
         // 消息管理（需要认证）
         .route("/v1/conversations/:id/messages", get(list_messages_handler))
-        .route("/v1/conversations/:id/messages", post(add_message_handler))
+        // .route("/v1/conversations/:id/messages", post(add_message_handler))
         .route("/v1/conversations/:id/messages/:message_id", get(get_message_handler))
         .route("/v1/conversations/:id/messages/:message_id", delete(delete_message_handler))
-        // 暂时移除聊天存储中间件，后续优化
     }
 
 

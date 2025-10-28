@@ -24,9 +24,9 @@ pub struct ChatRequest {
     /// 会话ID（用于多轮对话，可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<i64>,
-    /// 额外的元数据
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, serde_json::Value>,
+    /// 额外的元数据（可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
 fn default_model() -> String {
@@ -213,7 +213,7 @@ impl std::error::Error for AuthError {}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Conversation {
     /// 对话ID
-    pub id: Option<i32>,
+    pub conversation_id: Option<i32>,
     /// 用户ID
     pub user_id: i32,
         /// 对话标题

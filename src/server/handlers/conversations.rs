@@ -11,14 +11,15 @@ use super::chat::ServerState;
 
 /// 获取用户对话列表
 pub async fn list_conversations_handler(
+    Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
     Query(params): Query<ListConversationsQuery>,
 ) -> Result<Json<ConversationListResponse>, ErrorResponse> {
-    info!("获取对话列表: limit={}, offset={}",
-          params.limit, params.offset);
+    info!("获取对话列表: limit={}, offset={}, user_id={}",
+          params.limit, params.offset, auth_user.user_id);
 
-    // 目前暂时使用用户ID = 1，实际应该从认证信息中获取
-    let user_id = 1i64;
+    // 从认证信息中获取真实用户ID
+    let user_id = auth_user.user_id as i64;
 
     // 构建基本查询SQL
     let mut sql = String::from(
@@ -65,7 +66,7 @@ pub async fn list_conversations_handler(
     let conversations: Vec<Conversation> = rows
         .into_iter()
         .map(|row| Conversation {
-            id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+            conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
             user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
             title: row.try_get::<Option<String>, _>("title").ok().flatten(),
             model: row.try_get::<String, _>("model").unwrap_or_default(),
@@ -240,7 +241,7 @@ pub async fn create_conversation_handler(
     })?;
 
     let conversation = Conversation {
-        id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+        conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
@@ -304,7 +305,7 @@ pub async fn get_conversation_handler(
     })?;
 
     let conversation = Conversation {
-        id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+        conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
@@ -400,7 +401,7 @@ pub async fn update_conversation_title_handler(
     })?;
 
     let conversation = Conversation {
-        id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+        conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),

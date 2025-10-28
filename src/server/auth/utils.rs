@@ -30,7 +30,7 @@ pub fn extract_api_key(request: &Request) -> Option<String> {
 /// 创建鉴权成功响应
 pub fn create_auth_response(auth_result: AuthResult) -> Response {
     let success_response = serde_json::json!({
-        "status": "success",
+        "valid": true,
         "message": "鉴权成功",
         "user": {
             "username": auth_result.user_info.username,
