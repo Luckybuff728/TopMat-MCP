@@ -59,32 +59,40 @@ pub async fn chat_handler(
     info!("收到聊天请求: model={}, stream={}, message={}, user_id={}",
           request.model, request.stream, request.message, auth_user.user_id);
 
-    // 异步保存聊天数据（不阻塞响应）
-    let db_clone = state.database.clone();
-    let request_clone = request.clone();
-    let user_id = auth_user.user_id as i64;
-    tokio::spawn(async move {
-        match save_chat_request_data_with_retry(&db_clone, &request_clone, user_id, 3).await {
-            Ok(attempts) => {
-                info!("Chat request data saved successfully after {} attempts for user {}", attempts, user_id);
-            }
-            Err(e) => {
-                error!("Failed to save chat request data after multiple retries: {}", e);
-            }
-        }
-    });
-
+    // 为新对话生成UUID
+    let mut request_with_id = request.clone();
+    if request_with_id.conversation_id.is_none() {
+        request_with_id.conversation_id = Some(crate::server::models::generate_conversation_id());
+    }
+    tracing::info!("使用对话ID: {}", request_with_id.conversation_id.as_ref().unwrap());
     // 处理聊天请求，获取ChatResponse用于保存助手消息
-    let (response, chat_response) = crate::server::model_router::get_model_router().handle_chat_request_with_response(request.clone()).await?;
+    let (response, chat_response) = crate::server::model_router::get_model_router().handle_chat_request_with_response(request_with_id.clone()).await?;
 
-    // 异步保存助手消息到数据库
+    // 先保存聊天数据（创建对话和用户消息）
     let db_clone = state.database.clone();
-    let conversation_id = chat_response.conversation_id;
+    let request_clone = request_with_id.clone();
+    let user_id = auth_user.user_id as i64;
+    let conversation_id_for_assistant = match save_chat_request_data_with_retry(&db_clone, &request_clone, user_id, 3).await {
+        Ok((attempts, conversation_id)) => {
+            info!("Chat request data saved successfully after {} attempts for user {}, conversation_id: {}", attempts, user_id, conversation_id);
+            conversation_id
+        }
+        Err(e) => {
+            error!("Failed to save chat request data after multiple retries: {}", e);
+            // 如果保存聊天数据失败，我们仍然要返回响应，但不保存助手消息
+            return Ok(response);
+        }
+    };
+
+    // 异步保存助手消息到数据库（确保对话已创建）
+    let db_clone = state.database.clone();
+    let mut chat_response_clone = chat_response.clone();
+    chat_response_clone.conversation_id = conversation_id_for_assistant.clone();
     let user_id = auth_user.user_id as i64;
     tokio::spawn(async move {
-        match save_assistant_message_with_retry(&db_clone, &chat_response, user_id, 3).await {
+        match save_assistant_message_with_retry(&db_clone, &chat_response_clone, user_id, 3).await {
             Ok(attempts) => {
-                info!("Assistant message saved successfully after {} attempts for conversation {}", attempts, conversation_id);
+                info!("Assistant message saved successfully after {} attempts for conversation {}", attempts, conversation_id_for_assistant);
             }
             Err(e) => {
                 error!("Failed to save assistant message after multiple retries: {}", e);
@@ -101,13 +109,13 @@ async fn save_chat_request_data_with_retry(
     request: &ChatRequest,
     user_id: i64,
     max_retries: u32,
-) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(u32, String), Box<dyn std::error::Error + Send + Sync>> {
     let mut attempts = 0;
 
     for attempt in 1..=max_retries {
         attempts = attempt;
         match save_chat_request_data(db, request, user_id).await {
-            Ok(_) => return Ok(attempts),
+            Ok(conversation_id) => return Ok((attempts, conversation_id)),
             Err(e) => {
                 warn!("Attempt {} failed to save chat data for user {}: {}", attempt, user_id, e);
                 if attempt < max_retries {
@@ -127,10 +135,25 @@ async fn save_chat_request_data(
     db: &DatabaseConnection,
     request: &ChatRequest,
     user_id: i64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
 
-    // 检查是否是现有对话还是新对话
-    let conversation_id: i64 = if let Some(existing_conversation_id) = request.conversation_id {
+    // 现在request.conversation_id总是存在，只需要检查数据库中是否有记录
+    let conversation_id = request.conversation_id.as_ref().unwrap().clone();
+
+    // 检查这个对话在数据库中是否存在
+    let conversation_exists: bool = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*) > 0
+        FROM conversations
+        WHERE conversation_id = ? AND user_id = ?
+        "#
+    )
+    .bind(&conversation_id)
+    .bind(user_id)
+    .fetch_one(db.pool())
+    .await?;
+
+    if conversation_exists {
         // 使用现有对话，更新时间戳
         sqlx::query(
             r#"
@@ -139,27 +162,25 @@ async fn save_chat_request_data(
             WHERE conversation_id = ? AND user_id = ?
             "#
         )
-        .bind(existing_conversation_id)
+        .bind(&conversation_id)
         .bind(user_id)
         .execute(db.pool())
         .await?;
-
-        existing_conversation_id
     } else {
-        // 创建新对话
-        sqlx::query_scalar(
+        // 数据库中没有记录，创建新对话
+        sqlx::query(
             r#"
-            INSERT INTO conversations (user_id, title, model, created_at, updated_at)
-            VALUES (?1, ?2, ?3, datetime('now'), datetime('now'))
-            RETURNING conversation_id
+            INSERT INTO conversations (conversation_id, user_id, title, model, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))
             "#
         )
+        .bind(&conversation_id)
         .bind(user_id)
         .bind(generate_title_from_message(&request.message))
         .bind(&request.model)
-        .fetch_one(db.pool())
-        .await?
-    };
+        .execute(db.pool())
+        .await?;
+    }
 
     // 保存用户消息
     sqlx::query(
@@ -168,7 +189,7 @@ async fn save_chat_request_data(
         VALUES (?1, ?2, ?3, ?4, datetime('now'))
         "#
     )
-    .bind(conversation_id)
+    .bind(&conversation_id)
     .bind("user")
     .bind(&request.message)
     .bind(&request.model)
@@ -176,13 +197,15 @@ async fn save_chat_request_data(
     .await?;
 
     info!("Saved chat request data for conversation {}", conversation_id);
-    Ok(())
+    Ok(conversation_id)
 }
 
 /// 从用户消息生成对话标题
 fn generate_title_from_message(message: &str) -> String {
-    let title = if message.len() > 50 {
-        format!("{}...", &message[..50])
+    let title = if message.chars().count() > 50 {
+        // 安全地截取字符，避免UTF-8字符边界错误
+        let truncated: String = message.chars().take(50).collect();
+        format!("{}...", truncated)
     } else {
         message.to_string()
     };
@@ -231,7 +254,7 @@ async fn save_assistant_message(
         WHERE conversation_id = ? AND user_id = ?
         "#
     )
-    .bind(chat_response.conversation_id)
+    .bind(&chat_response.conversation_id)
     .bind(user_id)
     .fetch_one(db.pool())
     .await?;
@@ -254,7 +277,7 @@ async fn save_assistant_message(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
         "#
     )
-    .bind(chat_response.conversation_id)
+    .bind(&chat_response.conversation_id)
     .bind("assistant")
     .bind(&chat_response.content)
     .bind(&chat_response.model)
@@ -272,7 +295,7 @@ async fn save_assistant_message(
         WHERE conversation_id = ? AND user_id = ?
         "#
     )
-    .bind(chat_response.conversation_id)
+    .bind(&chat_response.conversation_id)
     .bind(user_id)
     .execute(db.pool())
     .await?;

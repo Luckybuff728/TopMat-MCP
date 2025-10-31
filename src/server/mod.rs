@@ -6,6 +6,7 @@ pub mod routing;
 pub mod model_router;
 pub mod database;
 pub mod middleware;
+pub mod mcp;
 
 pub mod models;
 pub mod request;

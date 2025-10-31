@@ -11,7 +11,7 @@ use super::chat::ServerState;
 /// 获取对话的消息历史
 pub async fn list_messages_handler(
     State(state): State<ServerState>,
-    Path(conversation_id): Path<i32>,
+    Path(conversation_id): Path<String>,
     Query(params): Query<ListMessagesQuery>,
 ) -> Result<Json<MessageListResponse>, ErrorResponse> {
     info!("获取消息历史: conversation_id={}, limit={}, offset={}",
@@ -33,7 +33,7 @@ pub async fn list_messages_handler(
 
     // 执行查询
     let mut query = sqlx::query(&sql);
-    query = query.bind(conversation_id as i64);
+    query = query.bind(&conversation_id);
 
     if let Some(before_id) = params.before {
         query = query.bind(before_id as i64);
@@ -66,7 +66,7 @@ pub async fn list_messages_handler(
 
             Message {
                 id: Some(row.try_get::<i64, _>("id").unwrap_or(0) as i32),
-                conversation_id: row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32,
+                conversation_id: row.try_get::<String, _>("conversation_id").unwrap_or_default(),
                 role: row.try_get::<String, _>("role").unwrap_or_default(),
                 content: row.try_get::<String, _>("content").unwrap_or_default(),
                 model: row.try_get::<Option<String>, _>("model").ok().flatten(),
@@ -89,7 +89,7 @@ pub async fn list_messages_handler(
     // 获取总数
     let total_sql = "SELECT COUNT(*) FROM messages WHERE conversation_id = ?";
     let mut total_query = sqlx::query(total_sql);
-    total_query = total_query.bind(conversation_id as i64);
+    total_query = total_query.bind(&conversation_id);
 
     let total_row = total_query
         .fetch_one(state.database.pool())
@@ -115,7 +115,7 @@ pub async fn list_messages_handler(
 
     Ok(Json(MessageListResponse {
         messages,
-        conversation_id,
+        conversation_id: conversation_id.clone(),
         total,
         page,
         page_size,
@@ -157,7 +157,7 @@ pub async fn get_message_handler(
 
     let message = Message {
         id: Some(row.try_get::<i64, _>("id").unwrap_or(0) as i32),
-        conversation_id: row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32,
+        conversation_id: row.try_get::<String, _>("conversation_id").unwrap_or_default(),
         role: row.try_get::<String, _>("role").unwrap_or_default(),
         content: row.try_get::<String, _>("content").unwrap_or_default(),
         model: row.try_get::<Option<String>, _>("model").ok().flatten(),
@@ -181,7 +181,7 @@ pub async fn get_message_handler(
 /// 删除消息
 pub async fn delete_message_handler(
     State(state): State<ServerState>,
-    Path((conversation_id, message_id)): Path<(i32, i32)>,
+    Path((conversation_id, message_id)): Path<(String, i32)>,
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
     info!("删除消息: conversation_id={}, message_id={}",
           conversation_id, message_id);
@@ -190,7 +190,7 @@ pub async fn delete_message_handler(
 
     let result = sqlx::query(sql)
         .bind(message_id as i64)
-        .bind(conversation_id as i64)
+        .bind(&conversation_id)
         .execute(state.database.pool())
         .await
         .map_err(|e| {
@@ -231,7 +231,7 @@ pub async fn delete_message_handler(
 /// 添加新消息到对话
 pub async fn add_message_handler(
     State(state): State<ServerState>,
-    Path(conversation_id): Path<i32>,
+    Path(conversation_id): Path<String>,
     Json(request): Json<Message>,
 ) -> Result<Json<Message>, ErrorResponse> {
     info!("添加消息到对话: conversation_id={}, role={}",
@@ -246,7 +246,7 @@ pub async fn add_message_handler(
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     let result = sqlx::query(sql)
-        .bind(conversation_id as i64)
+        .bind(&conversation_id)
         .bind(&request.role)
         .bind(&request.content)
         .bind(&request.model)
@@ -272,10 +272,10 @@ pub async fn add_message_handler(
     let message_id = result.last_insert_rowid();
 
     // 更新对话的消息计数和更新时间
-    let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = ? WHERE id = ?";
+    let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = ? WHERE conversation_id = ?";
     sqlx::query(update_sql)
         .bind(chrono::Utc::now())
-        .bind(conversation_id as i64)
+        .bind(&conversation_id)
         .execute(state.database.pool())
         .await
         .map_err(|e| {
@@ -292,7 +292,7 @@ pub async fn add_message_handler(
 
     let message = Message {
         id: Some(message_id as i32),
-        conversation_id,
+        conversation_id: conversation_id.clone(),
         role: request.role,
         content: request.content,
         model: request.model,

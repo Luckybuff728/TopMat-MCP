@@ -276,7 +276,7 @@ data: {"type":"final","response":{"content":"人工智能的发展历史...","mo
 
 **请求：**
 ```http
-GET /usage/stats?period=day&from_date=2024-10-01T00:00:00Z&to_date=2024-10-27T23:59:59Z
+GET /usage/stats
 Authorization: Bearer your_api_key_here
 ```
 
@@ -288,29 +288,29 @@ Authorization: Bearer your_api_key_here
 **响应：**
 ```json
 {
-  "period": "day",
-  "from_date": "2024-10-01T00:00:00Z",
-  "to_date": "2024-10-27T23:59:59Z",
-  "stats": {
-    "total_requests": 156,
-    "total_tokens": 45680,
-    "total_cost": 45.68,
-    "avg_response_time_ms": 1250.5,
-    "model_usage": {
-      "qwen-plus": {
-        "model": "qwen-plus",
-        "requests": 98,
-        "tokens": 32450,
-        "cost": 32.45
-      },
-      "ollama-qwen3-4b": {
-        "model": "ollama-qwen3-4b",
-        "requests": 58,
-        "tokens": 13230,
-        "cost": 13.23
-      }
+    "period": "day",
+    "from_date": "2025-09-28T07:56:27+00:00",
+    "to_date": "2025-10-28T07:56:27+00:00",
+    "stats": {
+        "total_requests": 4,
+        "total_tokens": 693,
+        "total_cost": 0.004,
+        "avg_response_time_ms": 1250.0,
+        "model_usage": {
+            "ollama-qwen3-4b": {
+                "model": "ollama-qwen3-4b",
+                "requests": 3,
+                "tokens": 670,
+                "cost": 0.003
+            },
+            "qwen-plus": {
+                "model": "qwen-plus",
+                "requests": 1,
+                "tokens": 23,
+                "cost": 0.001
+            }
+        }
     }
-  }
 }
 ```
 

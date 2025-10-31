@@ -66,7 +66,7 @@ pub async fn list_conversations_handler(
     let conversations: Vec<Conversation> = rows
         .into_iter()
         .map(|row| Conversation {
-            conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+            conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
             user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
             title: row.try_get::<Option<String>, _>("title").ok().flatten(),
             model: row.try_get::<String, _>("model").unwrap_or_default(),
@@ -138,18 +138,21 @@ pub async fn create_conversation_handler(
         }
     })?;
 
+    // 生成UUID作为对话ID
+    let conversation_id = crate::server::models::generate_conversation_id();
+
     // 创建对话
-    let conversation_id: i64 = sqlx::query_scalar(
+    sqlx::query(
         r#"
-        INSERT INTO conversations (user_id, title, model, created_at, updated_at)
-        VALUES (?1, ?2, ?3, datetime('now'), datetime('now'))
-        RETURNING conversation_id
+        INSERT INTO conversations (conversation_id, user_id, title, model, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))
         "#
     )
+    .bind(&conversation_id)
     .bind(user_id)
     .bind(&request.title)
     .bind("qwen-plus") // 默认模型，后续可以从请求中获取
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         error!("创建对话失败: {}", e);
@@ -172,7 +175,7 @@ pub async fn create_conversation_handler(
             RETURNING message_id
             "#
         )
-        .bind(conversation_id)
+        .bind(&conversation_id)
         .bind("user")
         .bind(initial_message)
         .bind("qwen-plus")
@@ -192,7 +195,7 @@ pub async fn create_conversation_handler(
 
         Some(Message {
             id: Some(message_id as i32),
-            conversation_id: conversation_id as i32,
+            conversation_id: conversation_id.clone(),
             role: "user".to_string(),
             content: initial_message.clone(),
             model: Some("qwen-plus".to_string()),
@@ -225,7 +228,7 @@ pub async fn create_conversation_handler(
         WHERE conversation_id = ?
         "#
     )
-    .bind(conversation_id)
+    .bind(&conversation_id)
     .fetch_one(state.database.pool())
     .await
     .map_err(|e| {
@@ -241,7 +244,7 @@ pub async fn create_conversation_handler(
     })?;
 
     let conversation = Conversation {
-        conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+        conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
@@ -305,7 +308,7 @@ pub async fn get_conversation_handler(
     })?;
 
     let conversation = Conversation {
-        conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+        conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
@@ -401,7 +404,7 @@ pub async fn update_conversation_title_handler(
     })?;
 
     let conversation = Conversation {
-        conversation_id: Some(row.try_get::<i64, _>("conversation_id").unwrap_or(0) as i32),
+        conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),

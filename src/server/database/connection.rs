@@ -108,7 +108,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS conversations (
-            conversation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             title TEXT,
             model TEXT NOT NULL,
@@ -128,7 +128,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         r#"
         CREATE TABLE IF NOT EXISTS messages (
             message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             model TEXT,

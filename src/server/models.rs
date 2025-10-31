@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// 聊天请求结构
 #[derive(Debug, Deserialize, Clone)]
@@ -23,7 +24,7 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     /// 会话ID（用于多轮对话，可选）
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub conversation_id: Option<i64>,
+    pub conversation_id: Option<String>,
     /// 额外的元数据（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
@@ -44,7 +45,7 @@ pub struct ChatResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
     /// 会话ID
-    pub conversation_id: i64,
+    pub conversation_id: String,
     /// 响应时间戳
     pub timestamp: chrono::DateTime<chrono::Utc>,
     /// 额外的元数据
@@ -89,6 +90,14 @@ pub enum StreamChunk {
         name: String,
         /// 工具参数
         arguments: serde_json::Value,
+    },
+    /// 工具响应
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        /// 工具调用ID
+        id: String,
+        /// 工具执行结果
+        result: String,
     },
     /// 错误信息
     #[serde(rename = "error")]
@@ -213,7 +222,7 @@ impl std::error::Error for AuthError {}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Conversation {
     /// 对话ID
-    pub conversation_id: Option<i32>,
+    pub conversation_id: Option<String>,
     /// 用户ID
     pub user_id: i32,
         /// 对话标题
@@ -236,7 +245,7 @@ pub struct Message {
     /// 消息ID
     pub id: Option<i32>,
     /// 对话ID
-    pub conversation_id: i32,
+    pub conversation_id: String,
     /// 角色 (user/assistant/system)
     pub role: String,
     /// 消息内容
@@ -255,7 +264,7 @@ pub struct Message {
 #[derive(Debug, Deserialize)]
 pub struct CreateConversationRequest {
     /// 会话ID
-    pub conversation_id: Option<i64>,
+    pub conversation_id: Option<String>,
     /// 对话标题 (可选)
     pub title: Option<String>,
     /// 系统提示词 (可选)
@@ -274,7 +283,7 @@ pub struct ListConversationsQuery {
     #[serde(default = "default_offset")]
     pub offset: i64,
     /// 按会话ID筛选（可选）
-    pub conversation_id: Option<i64>,
+    pub conversation_id: Option<String>,
     /// 搜索关键词
     pub search: Option<String>,
 }
@@ -329,7 +338,7 @@ pub struct MessageListResponse {
     /// 消息列表
     pub messages: Vec<Message>,
     /// 对话ID
-    pub conversation_id: i32,
+    pub conversation_id: String,
     /// 总数量
     pub total: i64,
     /// 当前页码
@@ -463,4 +472,16 @@ pub struct ModelHealth {
     pub response_time_ms: Option<u64>,
     /// 错误信息（如果有）
     pub error: Option<String>,
+}
+
+// ============== UUID 生成函数 ==============
+
+/// 生成新的会话ID（UUID v4）
+pub fn generate_conversation_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// 验证会话ID格式
+pub fn is_valid_conversation_id(id: &str) -> bool {
+    id.parse::<Uuid>().is_ok()
 }

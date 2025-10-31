@@ -35,7 +35,7 @@ pub struct ApiKey {
 /// 对话模型
 #[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
 pub struct Conversation {
-    pub conversation_id: i64,
+    pub conversation_id: String,
     pub user_id: i64,
     pub title: Option<String>,
     pub model: String,
@@ -49,7 +49,7 @@ pub struct Conversation {
 #[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
 pub struct Message {
     pub message_id: i64,
-    pub conversation_id: i64,
+    pub conversation_id: String,
     pub role: String,
     pub content: String,
     pub model: Option<String>,
@@ -99,7 +99,7 @@ pub struct CreateApiKeyRequest {
 #[derive(Debug, Deserialize)]
 pub struct CreateConversationRequest {
     pub user_id: i64,
-    pub conversation_id: i64,
+    pub conversation_id: String,
     pub title: Option<String>,
     pub model: String,
 }
@@ -107,7 +107,7 @@ pub struct CreateConversationRequest {
 /// 创建消息请求
 #[derive(Debug, Deserialize)]
 pub struct CreateMessageRequest {
-    pub conversation_id: i64,
+    pub conversation_id: String,
     pub role: String,
     pub content: String,
     pub model: Option<String>,
