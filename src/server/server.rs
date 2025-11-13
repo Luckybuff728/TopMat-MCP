@@ -36,8 +36,49 @@ fn create_cors_layer() -> CorsLayer {
 pub async fn create_server(database: crate::server::database::DatabaseConnection) -> Router {
     let state = crate::server::handlers::chat::ServerState::new(database).await;
 
-    // 创建受保护的路由并添加认证中间件
-    let protected_routes = crate::server::routing::create_protected_routes()
+    // 创建聊天路由，添加消息记录中间件（在认证之后）
+    let chat_route = Router::new()
+        .route("/v1/chat", axum::routing::post(crate::server::handlers::chat_handler))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::server::middleware::message_logger::MessageLogger::log_messages,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::server::middleware::auth::AuthMiddleware::authenticate_request,
+        ));
+    
+    // 创建 MCP 服务（需要认证，但对 GET 请求可能需要特殊处理）
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpService, 
+        session::local::LocalSessionManager,
+    };
+    
+    let mcp_service = StreamableHttpService::new(
+        || Ok(crate::server::mcp::create_mcp_server()),
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+    
+    // MCP 路由 - 先应用 MCP 服务，再应用 MCP 专用认证中间件（只对 POST 请求认证）
+    let mcp_route = Router::new()
+        .nest_service("/mcp", mcp_service)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::server::middleware::mcp_auth::McpAuthMiddleware::authenticate_request,
+        ));
+    
+    // 创建其他受保护的路由（只需要认证）
+    let other_protected_routes = Router::new()
+        .route("/usage/stats", axum::routing::get(crate::server::handlers::get_usage_stats_handler))
+        .route("/v1/conversations", axum::routing::get(crate::server::handlers::list_conversations_handler))
+        .route("/v1/conversations", axum::routing::post(crate::server::handlers::create_conversation_handler))
+        .route("/v1/conversations/:id", axum::routing::get(crate::server::handlers::get_conversation_handler))
+        .route("/v1/conversations/:id/title", axum::routing::put(crate::server::handlers::update_conversation_title_handler))
+        .route("/v1/conversations/:id", axum::routing::delete(crate::server::handlers::delete_conversation_handler))
+        .route("/v1/conversations/:id/messages", axum::routing::get(crate::server::handlers::list_messages_handler))
+        .route("/v1/conversations/:id/messages/:message_id", axum::routing::get(crate::server::handlers::get_message_handler))
+        .route("/v1/conversations/:id/messages/:message_id", axum::routing::delete(crate::server::handlers::delete_message_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::server::middleware::auth::AuthMiddleware::authenticate_request,
@@ -48,7 +89,9 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
 
     Router::new()
         .merge(public_routes)
-        .merge(protected_routes)
+        .merge(chat_route)
+        .merge(mcp_route)
+        .merge(other_protected_routes)
         .layer(create_cors_layer())
         .with_state(state)
 }

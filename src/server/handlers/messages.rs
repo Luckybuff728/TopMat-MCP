@@ -1,21 +1,55 @@
 use axum::{
-    extract::{Query, State, Path},
+    extract::{Query, State, Path, Extension},
     response::Json,
 };
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use sqlx::Row;
 
 use crate::server::models::*;
+use crate::server::middleware::AuthUser;
 use super::chat::ServerState;
 
 /// 获取对话的消息历史
 pub async fn list_messages_handler(
+    Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
     Path(conversation_id): Path<String>,
     Query(params): Query<ListMessagesQuery>,
 ) -> Result<Json<MessageListResponse>, ErrorResponse> {
-    info!("获取消息历史: conversation_id={}, limit={}, offset={}",
-          conversation_id, params.limit, params.offset);
+    info!("获取消息历史: conversation_id={}, limit={}, offset={}, user_id={}",
+          conversation_id, params.limit, params.offset, auth_user.user_id);
+
+    // 验证用户是否有权限访问该对话
+    let conversation_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+    )
+    .bind(&conversation_id)
+    .bind(auth_user.user_id as i64)
+    .fetch_one(state.database.pool())
+    .await
+    .map_err(|e| {
+        error!("验证对话权限失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "验证对话权限失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Utc::now(),
+        }
+    })?;
+
+    if !conversation_exists {
+        warn!("用户 {} 尝试访问无权限的对话 {}", auth_user.user_id, conversation_id);
+        return Err(ErrorResponse {
+            error: "conversation_not_found".to_string(),
+            message: "对话不存在或无权访问".to_string(),
+            details: Some(serde_json::json!({
+                "conversation_id": conversation_id
+            })),
+            timestamp: chrono::Utc::now(),
+        });
+    }
 
     // 构建基本查询SQL
     let mut sql = String::from(
@@ -65,7 +99,7 @@ pub async fn list_messages_handler(
             let metadata = metadata_str.and_then(|s| serde_json::from_str(&s).ok());
 
             Message {
-                id: Some(row.try_get::<i64, _>("id").unwrap_or(0) as i32),
+                id: Some(row.try_get::<i64, _>("message_id").unwrap_or(0) as i32),
                 conversation_id: row.try_get::<String, _>("conversation_id").unwrap_or_default(),
                 role: row.try_get::<String, _>("role").unwrap_or_default(),
                 content: row.try_get::<String, _>("content").unwrap_or_default(),
@@ -126,18 +160,52 @@ pub async fn list_messages_handler(
 
 /// 获取单个消息详情
 pub async fn get_message_handler(
+    Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
-    Path((conversation_id, message_id)): Path<(i32, i32)>,
+    Path((conversation_id, message_id)): Path<(String, i32)>,
 ) -> Result<Json<Message>, ErrorResponse> {
-    info!("获取消息详情: conversation_id={}, message_id={}",
-          conversation_id, message_id);
+    info!("获取消息详情: conversation_id={}, message_id={}, user_id={}",
+          conversation_id, message_id, auth_user.user_id);
+
+    // 验证用户是否有权限访问该对话
+    let conversation_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+    )
+    .bind(&conversation_id)
+    .bind(auth_user.user_id as i64)
+    .fetch_one(state.database.pool())
+    .await
+    .map_err(|e| {
+        error!("验证对话权限失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "验证对话权限失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Utc::now(),
+        }
+    })?;
+
+    if !conversation_exists {
+        warn!("用户 {} 尝试访问无权限的对话 {} 的消息 {}", auth_user.user_id, conversation_id, message_id);
+        return Err(ErrorResponse {
+            error: "conversation_not_found".to_string(),
+            message: "对话不存在或无权访问".to_string(),
+            details: Some(serde_json::json!({
+                "conversation_id": conversation_id,
+                "message_id": message_id
+            })),
+            timestamp: chrono::Utc::now(),
+        });
+    }
 
     let sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
               FROM messages WHERE message_id = ? AND conversation_id = ?";
 
     let row = sqlx::query(sql)
         .bind(message_id as i64)
-        .bind(conversation_id as i64)
+        .bind(&conversation_id)
         .fetch_one(state.database.pool())
         .await
         .map_err(|e| {
@@ -156,7 +224,7 @@ pub async fn get_message_handler(
     let metadata = metadata_str.and_then(|s| serde_json::from_str(&s).ok());
 
     let message = Message {
-        id: Some(row.try_get::<i64, _>("id").unwrap_or(0) as i32),
+        id: Some(row.try_get::<i64, _>("message_id").unwrap_or(0) as i32),
         conversation_id: row.try_get::<String, _>("conversation_id").unwrap_or_default(),
         role: row.try_get::<String, _>("role").unwrap_or_default(),
         content: row.try_get::<String, _>("content").unwrap_or_default(),
@@ -180,11 +248,45 @@ pub async fn get_message_handler(
 
 /// 删除消息
 pub async fn delete_message_handler(
+    Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
     Path((conversation_id, message_id)): Path<(String, i32)>,
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
-    info!("删除消息: conversation_id={}, message_id={}",
-          conversation_id, message_id);
+    info!("删除消息: conversation_id={}, message_id={}, user_id={}",
+          conversation_id, message_id, auth_user.user_id);
+
+    // 验证用户是否有权限访问该对话
+    let conversation_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+    )
+    .bind(&conversation_id)
+    .bind(auth_user.user_id as i64)
+    .fetch_one(state.database.pool())
+    .await
+    .map_err(|e| {
+        error!("验证对话权限失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "验证对话权限失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Utc::now(),
+        }
+    })?;
+
+    if !conversation_exists {
+        warn!("用户 {} 尝试删除无权限对话 {} 的消息 {}", auth_user.user_id, conversation_id, message_id);
+        return Err(ErrorResponse {
+            error: "conversation_not_found".to_string(),
+            message: "对话不存在或无权访问".to_string(),
+            details: Some(serde_json::json!({
+                "conversation_id": conversation_id,
+                "message_id": message_id
+            })),
+            timestamp: chrono::Utc::now(),
+        });
+    }
 
     let sql = "DELETE FROM messages WHERE message_id = ? AND conversation_id = ?";
 
@@ -230,12 +332,45 @@ pub async fn delete_message_handler(
 
 /// 添加新消息到对话
 pub async fn add_message_handler(
+    Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
     Path(conversation_id): Path<String>,
     Json(request): Json<Message>,
 ) -> Result<Json<Message>, ErrorResponse> {
-    info!("添加消息到对话: conversation_id={}, role={}",
-          conversation_id, request.role);
+    info!("添加消息到对话: conversation_id={}, role={}, user_id={}",
+          conversation_id, request.role, auth_user.user_id);
+
+    // 验证用户是否有权限访问该对话
+    let conversation_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+    )
+    .bind(&conversation_id)
+    .bind(auth_user.user_id as i64)
+    .fetch_one(state.database.pool())
+    .await
+    .map_err(|e| {
+        error!("验证对话权限失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "验证对话权限失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Utc::now(),
+        }
+    })?;
+
+    if !conversation_exists {
+        warn!("用户 {} 尝试向无权限对话 {} 添加消息", auth_user.user_id, conversation_id);
+        return Err(ErrorResponse {
+            error: "conversation_not_found".to_string(),
+            message: "对话不存在或无权访问".to_string(),
+            details: Some(serde_json::json!({
+                "conversation_id": conversation_id
+            })),
+            timestamp: chrono::Utc::now(),
+        });
+    }
 
     // 将metadata转换为JSON字符串
     let metadata_str = request.metadata

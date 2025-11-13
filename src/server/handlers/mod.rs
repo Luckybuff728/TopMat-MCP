@@ -4,6 +4,7 @@ pub mod models;
 pub mod conversations;
 pub mod messages;
 pub mod usage;
+pub mod mcp;
 
 pub use auth::auth_handler;
 pub use chat::chat_handler;

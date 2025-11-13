@@ -1,8 +1,8 @@
 use rig::prelude::*;
 
 use crate::server::models::*;
-use crate::server::request::{handle_normal_request, handle_streaming_request};
-
+use crate::server::request::handle_chat_request;
+use crate::server::mcp::McpAgent;
 
 
 /// 处理Ollama请求并返回ChatResponse (ollama-qwen3-4b)
@@ -17,11 +17,7 @@ pub async fn ollama_qwen3_4b(
         .temperature(temperature as f64)
         .build();
 
-    if request.stream {
-        handle_streaming_request(agent, request).await
-    } else {
-        handle_normal_request(agent, request).await
-    }
+    handle_chat_request(agent, request).await
 }
 
 // /// 处理Ollama请求并返回ChatResponse (ollama-llama3)
@@ -130,7 +126,7 @@ pub async fn ollama_llama3(
     request: ChatRequest,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     // 1. 连接到 MCP 服务器
-    let mcp_server_url = "http://127.0.0.1:3001/mcp".to_string();
+    let mcp_server_url = "http://127.0.0.1:10001/mcp".to_string();
     let mcp_api_key = "tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string();
 
     // 使用StreamableHttpClientTransportConfig添加Authorization头
@@ -199,12 +195,9 @@ pub async fn ollama_llama3(
         // .rmcp_tools(tools, mcp_client.peer().to_owned());
 
     let agent = agent_builder.build();
+    let mcp_agent = McpAgent::new(agent, mcp_client);
     tracing::info!("Agent built successfully, starting request processing");
 
     // 3. 处理请求（流式或非流式）
-    if request.stream {
-        handle_streaming_request(agent, request).await
-    } else {
-        handle_normal_request(agent, request).await
-    }
+    handle_chat_request(mcp_agent, request).await
 }

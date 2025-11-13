@@ -3,7 +3,7 @@ use rig::client::{ProviderClient, CompletionClient};
 use std::sync::Arc;
 
 use crate::server::models::*;
-use crate::server::request::{handle_normal_request, handle_streaming_request, handle_normal_request_mcp, handle_streaming_request_mcp};
+use crate::server::request::handle_chat_request;
 use crate::server::mcp::McpAgent;
 
 use rmcp::{model::{ClientInfo, ClientCapabilities, Implementation}, ServiceExt};
@@ -23,11 +23,7 @@ pub async fn qwen_plus(
         .temperature(temperature as f64)
         .build();
 
-    if request.stream {
-        handle_streaming_request(agent, request).await
-    } else {
-        handle_normal_request(agent, request).await
-    }
+    handle_chat_request(agent, request).await
 }
 
 /// 处理通义千问请求并返回ChatResponse (qwen-turbo)
@@ -41,11 +37,7 @@ pub async fn qwen_turbo(
         .temperature(0.8)
         .build();
 
-    if request.stream {
-        handle_streaming_request(agent, request).await
-    } else {
-        handle_normal_request(agent, request).await
-    }
+    handle_chat_request(agent, request).await
 }
 
 /// 处理通义千问请求并返回ChatResponse (qwen-max)
@@ -59,11 +51,7 @@ pub async fn qwen_max(
         .temperature(0.8)
         .build();
 
-    if request.stream {
-        handle_streaming_request(agent, request).await
-    } else {
-        handle_normal_request(agent, request).await
-    }
+    handle_chat_request(agent, request).await
 }
 
 /// 处理通义千问请求并返回ChatResponse (qwen-flash)
@@ -94,11 +82,7 @@ pub async fn qwq_plus(
         .temperature(0.8)
         .build();
 
-    if request.stream {
-        handle_streaming_request(agent, request).await
-    } else {
-        handle_normal_request(agent, request).await
-    }
+    handle_chat_request(agent, request).await
 }
 
 
@@ -106,7 +90,7 @@ pub async fn qwen_flash(
     request: ChatRequest,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     // 1. 连接到 MCP 服务器
-    let mcp_server_url = "http://127.0.0.1:3001/mcp".to_string();
+    let mcp_server_url = "http://127.0.0.1:10001/mcp".to_string();
 
     let mcp_api_key = "tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string();
 
@@ -181,10 +165,6 @@ pub async fn qwen_flash(
     let mcp_agent = McpAgent::new(raw_agent, mcp_client);
     tracing::info!("McpAgent built successfully, MCP client will stay alive during processing");
 
-    // 5. 处理请求（流式或非流式）- 使用 MCP 专用的处理函数
-    if request.stream {
-        handle_streaming_request_mcp(mcp_agent, request).await
-    } else {
-        handle_normal_request_mcp(mcp_agent, request).await
-    }
+    // 5. 处理请求（流式或非流式）- 使用统一的处理函数，自动适配 McpAgent 和流式模式
+    handle_chat_request(mcp_agent, request).await
 }

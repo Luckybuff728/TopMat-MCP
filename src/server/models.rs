@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 /// 聊天请求结构
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatRequest {
     /// 用户输入的消息
     pub message: String,
@@ -271,6 +271,8 @@ pub struct CreateConversationRequest {
     pub system_prompt: Option<String>,
     /// 初始消息 (可选)
     pub initial_message: Option<String>,
+    /// 使用的AI模型 (可选，默认为 qwen-plus)
+    pub model: Option<String>,
 }
 
 /// 对话列表查询参数

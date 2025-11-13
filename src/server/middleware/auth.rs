@@ -5,7 +5,7 @@ use axum::{
     response::Response,
     Extension,
 };
-use tracing::{info, error, warn};
+use tracing::{error, warn, debug};
 
 use crate::server::auth::{AuthClient, extract_api_key};
 use crate::server::models::{ErrorResponse, ApiKeyInfo, UserInfo};
@@ -31,7 +31,7 @@ impl AuthMiddleware {
         request: Request,
         next: Next,
     ) -> Result<Response, ErrorResponse> {
-        info!("开始认证请求: {}", request.uri());
+        debug!("开始认证请求: {}", request.uri());
 
         // 提取API密钥
         let api_key = extract_api_key(&request).ok_or_else(|| ErrorResponse {
@@ -41,7 +41,7 @@ impl AuthMiddleware {
             timestamp: chrono::Utc::now(),
         })?;
 
-        info!("提取到API密钥: {}...", &api_key[..std::cmp::min(4, api_key.len())]);
+        debug!("提取到API密钥: {}...", &api_key[..std::cmp::min(4, api_key.len())]);
 
         // 验证API密钥
         let auth_result = state.auth_client.verify_api_key(&api_key).await
@@ -103,7 +103,7 @@ impl AuthMiddleware {
             api_key: auth_result.api_key_info.api_key.clone(),
         };
 
-        info!("用户认证成功: user_id={}, username={}, subscription_level={}",
+        debug!("用户认证成功: user_id={}, username={}, subscription_level={}",
               auth_user.user_id, auth_user.username, auth_user.subscription_level);
 
         // 将用户信息注入到请求扩展中

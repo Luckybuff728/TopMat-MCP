@@ -141,6 +141,9 @@ pub async fn create_conversation_handler(
     // 生成UUID作为对话ID
     let conversation_id = crate::server::models::generate_conversation_id();
 
+    // 确定使用的模型，优先使用请求中的模型，否则使用默认模型
+    let model = request.model.as_deref().unwrap_or("qwen-plus");
+
     // 创建对话
     sqlx::query(
         r#"
@@ -151,7 +154,7 @@ pub async fn create_conversation_handler(
     .bind(&conversation_id)
     .bind(user_id)
     .bind(&request.title)
-    .bind("qwen-plus") // 默认模型，后续可以从请求中获取
+    .bind(model)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -178,7 +181,7 @@ pub async fn create_conversation_handler(
         .bind(&conversation_id)
         .bind("user")
         .bind(initial_message)
-        .bind("qwen-plus")
+        .bind(model) // 使用与对话相同的模型
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
@@ -198,7 +201,7 @@ pub async fn create_conversation_handler(
             conversation_id: conversation_id.clone(),
             role: "user".to_string(),
             content: initial_message.clone(),
-            model: Some("qwen-plus".to_string()),
+            model: Some(model.to_string()),
             usage: None,
             metadata: None,
             created_at: chrono::Utc::now(),
@@ -268,7 +271,7 @@ pub async fn create_conversation_handler(
 pub async fn get_conversation_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
-    Path(conversation_id): Path<i32>,
+    Path(conversation_id): Path<String>,
 ) -> Result<Json<Conversation>, ErrorResponse> {
     info!("获取对话详情: conversation_id={}, user_id={}", conversation_id, auth_user.user_id);
 
@@ -280,7 +283,7 @@ pub async fn get_conversation_handler(
         WHERE conversation_id = ? AND user_id = ?
         "#
     )
-    .bind(conversation_id as i64)
+    .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
     .fetch_one(state.database.pool())
     .await
@@ -327,7 +330,7 @@ pub async fn get_conversation_handler(
 pub async fn update_conversation_title_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
-    Path(conversation_id): Path<i32>,
+    Path(conversation_id): Path<String>,
     Json(request): Json<UpdateConversationTitleRequest>,
 ) -> Result<Json<Conversation>, ErrorResponse> {
     info!("更新对话标题: conversation_id={}, new_title={}, user_id={}",
@@ -342,7 +345,7 @@ pub async fn update_conversation_title_handler(
         "#
     )
     .bind(&request.title)
-    .bind(conversation_id as i64)
+    .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
     .execute(state.database.pool())
     .await
@@ -388,7 +391,7 @@ pub async fn update_conversation_title_handler(
         WHERE conversation_id = ?
         "#
     )
-    .bind(conversation_id as i64)
+    .bind(&conversation_id)
     .fetch_one(state.database.pool())
     .await
     .map_err(|e| {
@@ -425,7 +428,7 @@ pub async fn update_conversation_title_handler(
 pub async fn delete_conversation_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
-    Path(conversation_id): Path<i32>,
+    Path(conversation_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
     info!("删除对话: conversation_id={}, user_id={}", conversation_id, auth_user.user_id);
 
@@ -446,7 +449,7 @@ pub async fn delete_conversation_handler(
     let delete_messages_result = sqlx::query(
         "DELETE FROM messages WHERE conversation_id = ?"
     )
-    .bind(conversation_id as i64)
+    .bind(&conversation_id)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -465,7 +468,7 @@ pub async fn delete_conversation_handler(
     let delete_conversation_result = sqlx::query(
         "DELETE FROM conversations WHERE conversation_id = ? AND user_id = ?"
     )
-    .bind(conversation_id as i64)
+    .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
     .execute(&mut *tx)
     .await

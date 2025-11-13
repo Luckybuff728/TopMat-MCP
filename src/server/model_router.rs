@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::server::models::{ChatRequest, ChatResponse, ErrorResponse};
-use crate::server::agent::{qwen, ollama};
+use crate::server::agent::{qwen, ollama, coating_optimization};
 
 /// 模型路由器
 pub struct ModelRouter {
@@ -29,6 +29,7 @@ impl ModelRouter {
         router.register("ollama-qwen3-4b", |req| Box::pin(ollama::ollama_qwen3_4b(req)));
         router.register("ollama-llama3", |req| Box::pin(ollama::ollama_llama3(req)));
 
+        router.register("coating", |req| Box::pin(coating_optimization::coating_optimization(req)));
         router
     }
 
