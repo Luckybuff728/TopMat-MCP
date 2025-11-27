@@ -1,0 +1,93 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+README.md
+CLAUDE.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Development files
+.env
+.env.local
+.env.*.local
+*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Rust specific
+target/
+
+**/*.rs.bk
+
+# Testing
+tests/
+*.test
+*.spec
+
+# Temporary files
+*.tmp
+*.temp
+cache/
+.tmp/
+
+# OS generated files
+.DS_Store?
+ehthumbs.db
+Icon?
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+out/
+
+# Node.js (if any frontend tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (if any tools)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Backup files
+*.bak
+*.backup
+
+# Local configuration
+config*.json
+!config.example.json
+
+# Scripts
+scripts/
+*.sh
+
+# WASM files (if any)
+*.wasm
+wasm/
+
+# rust
+/target/

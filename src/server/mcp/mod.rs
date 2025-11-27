@@ -8,6 +8,7 @@
 pub mod mcp_agent;
 pub mod mcp_server;
 pub mod tool_registry;
+pub mod tool_macros;
 
 pub use mcp_agent::McpAgent;
 pub use mcp_server::{create_mcp_server, TopMatMcpServer};

@@ -2,7 +2,6 @@ pub mod agent;
 pub mod auth;
 pub mod handlers;
 pub mod responses;
-pub mod routing;
 pub mod model_router;
 pub mod database;
 pub mod middleware;

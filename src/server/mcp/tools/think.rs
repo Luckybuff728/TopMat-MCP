@@ -36,6 +36,12 @@ impl StdError for ThinkError {}
 #[derive(Deserialize, Serialize)]
 pub struct ThinkTool;
 
+impl Default for ThinkTool {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Tool for ThinkTool {
     const NAME: &'static str = "think";
 

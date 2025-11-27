@@ -390,6 +390,12 @@ impl CalphaMeshClient {
 #[derive(Deserialize, Serialize)]
 pub struct SubmitPointTask;
 
+impl Default for SubmitPointTask {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Tool for SubmitPointTask {
     const NAME: &'static str = "calphamesh_submit_point_task";
 
@@ -446,6 +452,12 @@ impl Tool for SubmitPointTask {
 // 提交 Line 计算任务工具
 #[derive(Deserialize, Serialize)]
 pub struct SubmitLineTask;
+
+impl Default for SubmitLineTask {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl Tool for SubmitLineTask {
     const NAME: &'static str = "calphamesh_submit_line_task";
@@ -517,6 +529,12 @@ impl Tool for SubmitLineTask {
 #[derive(Deserialize, Serialize)]
 pub struct SubmitScheilTask;
 
+impl Default for SubmitScheilTask {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl Tool for SubmitScheilTask {
     const NAME: &'static str = "calphamesh_submit_scheil_task";
 
@@ -573,6 +591,12 @@ impl Tool for SubmitScheilTask {
 // 查询任务状态工具
 #[derive(Deserialize, Serialize)]
 pub struct GetTaskStatus;
+
+impl Default for GetTaskStatus {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl Tool for GetTaskStatus {
     const NAME: &'static str = "calphamesh_get_task_status";
@@ -632,6 +656,12 @@ impl Tool for GetTaskStatus {
 // 列出任务工具
 #[derive(Deserialize, Serialize)]
 pub struct ListTasks;
+
+impl Default for ListTasks {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl Tool for ListTasks {
     const NAME: &'static str = "calphamesh_list_tasks";

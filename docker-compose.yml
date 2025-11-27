@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  topmat-llm:
+    image: 192.168.7.102:5000/topmat-llm:latest
+    container_name: topmat-llm
+    ports:
+      - "10007:3000"
+    environment:
+      - RUST_LOG=info
+      - TZ=Asia/Shanghai
+      - DATABASE_URL=sqlite:/app/data/data.db
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=3000
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

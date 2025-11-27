@@ -24,6 +24,12 @@ impl StdError for SimulationToolError {}
 #[derive(Deserialize, Serialize)]
 pub struct TopPhiSimulator;
 
+impl Default for TopPhiSimulator {
+    fn default() -> Self {
+        Self
+    }
+}
+
 #[derive(Deserialize)]
 pub struct TopPhiArgs {
     pub composition: String,
@@ -79,6 +85,12 @@ impl Tool for TopPhiSimulator {
 #[derive(Deserialize, Serialize)]
 pub struct MLPerformancePredictor;
 
+impl Default for MLPerformancePredictor {
+    fn default() -> Self {
+        Self
+    }
+}
+
 #[derive(Deserialize)]
 pub struct MLPredictorArgs {
     pub composition: String,
@@ -127,6 +139,12 @@ impl Tool for MLPerformancePredictor {
 #[derive(Deserialize, Serialize)]
 pub struct HistoricalDataQuery;
 
+impl Default for HistoricalDataQuery {
+    fn default() -> Self {
+        Self
+    }
+}
+
 #[derive(Deserialize)]
 pub struct HistoricalQueryArgs {
     pub composition_range: String,
@@ -173,6 +191,12 @@ impl Tool for HistoricalDataQuery {
 /// 实验数据读取工具（模拟）
 #[derive(Deserialize, Serialize)]
 pub struct ExperimentalDataReader;
+
+impl Default for ExperimentalDataReader {
+    fn default() -> Self {
+        Self
+    }
+}
 
 #[derive(Deserialize)]
 pub struct ExperimentalReaderArgs {
