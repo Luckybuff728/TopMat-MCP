@@ -124,6 +124,8 @@ pub struct PointTaskParams {
     pub pressure: f64,
     #[serde(default = "default_database")]
     pub database: String,
+    /// Calpha Mesh API 密钥
+    pub api_key: String,
 }
 
 // Line 计算参数
@@ -145,6 +147,8 @@ pub struct LineTaskParams {
     pub steps: i64,
     #[serde(default = "default_database")]
     pub database: String,
+    /// Calpha Mesh API 密钥
+    pub api_key: String,
 }
 
 // Scheil 计算参数
@@ -160,11 +164,15 @@ pub struct ScheilTaskParams {
     pub pressure: f64,
     #[serde(default = "default_database")]
     pub database: String,
+    /// Calpha Mesh API 密钥
+    pub api_key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TaskIdParams {
     pub task_id: i32,
+    /// Calpha Mesh API 密钥
+    pub api_key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -173,6 +181,8 @@ pub struct ListTasksParams {
     pub page: i32,
     #[serde(default = "default_items_per_page")]
     pub items_per_page: i32,
+    /// Calpha Mesh API 密钥
+    pub api_key: String,
 }
 
 // 默认值函数
@@ -439,7 +449,8 @@ impl Tool for SubmitPointTask {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let client = CalphaMeshClient::new("tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string());
+        // 使用参数中的 API key
+        let client = CalphaMeshClient::new(args.api_key.clone());
         let task_response = client.submit_point_task(args).await?;
 
         Ok(format!(
@@ -515,7 +526,8 @@ impl Tool for SubmitLineTask {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let client = CalphaMeshClient::new("tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string());
+        // 使用参数中的 API key
+        let client = CalphaMeshClient::new(args.api_key.clone());
         let task_response = client.submit_line_task(args).await?;
 
         Ok(format!(
@@ -578,7 +590,8 @@ impl Tool for SubmitScheilTask {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let client = CalphaMeshClient::new("tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string());
+        // 使用参数中的 API key
+        let client = CalphaMeshClient::new(args.api_key.clone());
         let task_response = client.submit_scheil_task(args).await?;
 
         Ok(format!(
@@ -623,7 +636,8 @@ impl Tool for GetTaskStatus {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let client = CalphaMeshClient::new("tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string());
+        // 使用参数中的 API key
+        let client = CalphaMeshClient::new(args.api_key.clone());
         let task = client.get_task_status(args.task_id).await?;
 
         let status_emoji = match task.status.as_str() {
@@ -692,7 +706,8 @@ impl Tool for ListTasks {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let client = CalphaMeshClient::new("tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string());
+        // 使用参数中的 API key
+        let client = CalphaMeshClient::new(args.api_key.clone());
         let list = client.list_tasks(args.page, args.items_per_page).await?;
 
         let mut result = format!("📋 我的任务列表 (第 {} 页，共 {} 页)\n\n", list.page, list.total_pages);

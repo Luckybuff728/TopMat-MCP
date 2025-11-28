@@ -9,8 +9,14 @@ use crate::server::models::{ErrorResponse, AuthError, AuthResult, ApiKeyInfo, Us
 
 /// 从请求中提取API Key
 pub fn extract_api_key(request: &Request) -> Option<String> {
+    extract_api_key_from_headers(request.headers())
+}
+
+pub fn extract_api_key_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    use axum::http::header;
+
     // 优先从Authorization header中提取
-    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
+    if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.to_lowercase().starts_with("bearer ") {
                 return Some(auth_str[7..].to_string());
@@ -19,14 +25,13 @@ pub fn extract_api_key(request: &Request) -> Option<String> {
     }
 
     // 从X-API-Key header中提取
-    if let Some(api_key_header) = request.headers().get("X-API-Key") {
+    if let Some(api_key_header) = headers.get("X-API-Key") {
         if let Ok(api_key) = api_key_header.to_str() {
             return Some(api_key.to_string());
         }
     }
     None
 }
-
 /// 创建鉴权成功响应
 pub fn create_auth_response(auth_result: AuthResult) -> Response {
     let success_response = serde_json::json!({

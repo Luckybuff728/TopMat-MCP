@@ -68,3 +68,5 @@ ENV/
 
 # doc
 docs/
+
+.claude/

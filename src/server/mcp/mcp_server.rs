@@ -9,9 +9,12 @@ use rmcp::{
     service::{RequestContext, RoleServer},
 };
 use serde_json::json;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::tool_registry::ToolRegistry;
+
+// 内联实现从HTTP headers提取API key的函数
+
 
 /// TopMat MCP 服务器
 #[derive(Clone)]
@@ -80,12 +83,38 @@ impl ServerHandler for TopMatMcpServer {
     async fn call_tool(
         &self,
         CallToolRequestParam { name, arguments }: CallToolRequestParam,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         info!("调用工具: {}（单例模式）", name);
 
+        // 为 calphamesh 工具自动注入 API key
+        let mut modified_arguments = arguments;
+        if name.starts_with("calphamesh_") {
+            // 尝试获取 axum::http::request::Parts 类型的扩展
+            if let Some(http_parts) = context.extensions.get::<axum::http::request::Parts>() {
+                info!("http_parts: {:#?}", http_parts);
+                // 尝试从中提取 API key
+                if let Some(api_key) = crate::server::auth::extract_api_key_from_headers(&http_parts.headers) {
+                    info!("从 HTTP headers 成功提取 API key: {}...", &api_key[..std::cmp::min(4, api_key.len())]);
+
+                    let mut args_map: serde_json::Map<String, serde_json::Value> =
+                        modified_arguments.unwrap_or_default().into_iter().collect();
+                    args_map.insert("api_key".to_string(), serde_json::Value::String(api_key));
+                    modified_arguments = Some(args_map);
+
+                    info!("为工具 {} 从 HTTP headers 注入 API key", name);
+                } else {
+                    warn!("HTTP headers 中也未找到有效的 API key");
+                }
+            } else {
+                warn!("RequestContext 中也没有 axum::http::request::Parts 扩展");
+                warn!("这表明 rmcp 框架没有正确传递 Axum 的 extensions");
+            }
+            
+        }
+
         // 将 arguments 转换为 JsonValue
-        let args_value = if let Some(args) = arguments {
+        let args_value = if let Some(args) = modified_arguments {
             serde_json::Value::Object(args)
         } else {
             json!({})

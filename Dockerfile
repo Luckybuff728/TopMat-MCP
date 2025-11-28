@@ -27,24 +27,19 @@ RUN cargo build --release --locked
 # 阶段 2: 运行时环境
 FROM debian:bookworm-slim
 
-# 安装运行时依赖
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -m -u 1000 appuser
+
 
 # 设置工作目录
 WORKDIR /app
 
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/target/release/TopMat-LLM /app/TopMat-LLM
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/* \
 
-# 创建数据目录
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
-
-# 切换到非root用户
-USER appuser
 
 # 暴露端口
 EXPOSE 3000

@@ -60,6 +60,29 @@ docker-compose up -d
 
 # Check container logs
 docker-compose logs -f topmat-llm
+
+# Health check endpoint
+curl http://localhost:10007/health
+```
+
+**Note**: Dockerfile uses Debian Bookworm slim base image for optimal size.
+
+## Development Workflow
+
+### Hot Reload Development
+```bash
+# Development with auto-restart (recommended for development)
+cargo install cargo-watch
+cargo watch -x run
+```
+
+### Quality Assurance
+```bash
+# Full quality check chain
+cargo fmt && cargo clippy && cargo test
+
+# Development with quality checks
+cargo watch -x "fmt && clippy && test"
 ```
 
 ## Architecture Overview
@@ -67,7 +90,7 @@ docker-compose logs -f topmat-llm
 ### Core Technology Stack
 - **Web Framework**: Axum v0.8 with Tokio async runtime
 - **Database**: SQLite with SQLx v0.7 for async database access
-- **LLM Framework**: rig-core v0.21.0 (vendored locally) with RMCP v0.8 support
+- **LLM Framework**: rig-core v0.23.1 (vendored locally) with RMCP v0.8 support
 - **MCP Transport**: StreamableHTTP, SSE, and client-server transports
 - **Authentication**: External API service integration with MCP-specific auth
 - **Serialization**: Serde for JSON handling
@@ -131,7 +154,7 @@ The project features a sophisticated MCP (Model Context Protocol) tool system wi
 - **Extensible**: Easy to add new providers via agent pattern
 
 #### Agent Examples Collection
-The project includes an extensive collection of 80+ agent examples in `src/server/agent/examples/` demonstrating:
+The project includes an extensive collection of 96 agent examples in `src/server/agent/examples/` demonstrating:
 - **Multiple Providers**: OpenAI, Anthropic, Gemini, Groq, Cohere, Together, Hyperbolic, etc.
 - **Advanced Patterns**: Multi-agent systems, tool orchestration, RAG, autonomous agents
 - **Streaming**: Real-time streaming responses with various providers
@@ -165,6 +188,10 @@ AUTH_API_URL=https://api.topmaterial-tech.com
 # AI Provider API Keys
 DASHSCOPE_API_KEY=your_dashscope_key  # Required for Qwen
 OLLAMA_BASE_URL=http://localhost:11434  # Required for Ollama
+
+# MCP Server Configuration (optional)
+MCP_SERVER_URL=http://127.0.0.1:10001/mcp  # External MCP server URL
+MCP_API_KEY=your_mcp_api_key  # MCP server authentication
 
 # Docker Environment
 TZ=Asia/Shanghai
@@ -295,10 +322,31 @@ data: {"type":"final","response":{...}}
 The project uses a vendored rig-core workspace in the `rig/` directory:
 - **Location**: `rig/rig-core/`
 - **Features**: RMCP (Model Context Protocol) support enabled
-- **Version**: v0.21.0 (local development version)
+- **Version**: v0.23.1 (local development version)
 - **Updates**: Workspace is committed alongside main project
 
 ## Testing
+
+### Running Tests
+```bash
+# Run all tests
+cargo test
+
+# Run with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_name
+
+# Run tests in parallel
+cargo test --release
+```
+
+### Testing Approach
+- **Unit Tests**: Located in individual modules with `#[cfg(test)]` sections
+- **Integration Tests**: Use the server's REST API endpoints
+- **Example Tests**: Agent examples can be run as integration tests
+- **Manual Testing**: Use curl commands or provided client examples
 
 ### Unit Tests
 ```rust
@@ -330,6 +378,7 @@ The server includes a sophisticated MCP (Model Context Protocol) implementation 
 ### Core Features
 - **StreamableHTTP Transport**: High-performance bidirectional communication
 - **SSE Support**: Server-sent events for real-time updates
+- **SSE Transport Alternative**: Additional SSE endpoint at `/sse/mcp/` for alternative transport
 - **Automatic Tool Registration**: Compile-time macro-based registration system
 - **Session Management**: Local session state with user context injection
 - **Custom Authentication**: GET requests for discovery, POST for execution
@@ -350,8 +399,9 @@ The server includes a sophisticated MCP (Model Context Protocol) implementation 
 
 - API Key authentication via external service
 - MCP-specific authentication patterns (GET open, POST secured)
-- CORS configuration for cross-origin requests
+- CORS configuration for cross-origin requests (currently permissive for development)
 - Input validation and sanitization
 - Database connection pooling
 - Error information sanitization in production responses
 - Tool execution sandboxing and resource limits
+- **Development Note**: CORS is configured as `very_permissive()` for development - should be restricted in production

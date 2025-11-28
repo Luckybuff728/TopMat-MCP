@@ -22,11 +22,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::server::models::{ChatRequest, ChatResponse, ErrorResponse};
 use crate::server::request::handle_chat_request;
+use crate::server::middleware::auth::AuthUser;
 // ============= 错误类型定义 =============
 
 
 pub async fn coating_optimization(
     request: ChatRequest,
+    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";

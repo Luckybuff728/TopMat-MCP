@@ -1,13 +1,16 @@
 use rig::prelude::*;
+use axum::{extract::Request, Extension};
 
 use crate::server::models::*;
 use crate::server::request::handle_chat_request;
 use crate::server::mcp::McpAgent;
+use crate::server::middleware::auth::AuthUser;
 
 
 /// 处理Ollama请求并返回ChatResponse (ollama-qwen3-4b)
 pub async fn ollama_qwen3_4b(
     request: ChatRequest,
+    _auth_user: crate::server::middleware::auth::AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
@@ -124,10 +127,14 @@ pub async fn ollama_llama3_test() -> Result<(), anyhow::Error> {
 /// 处理Ollama请求并返回ChatResponse (ollama-llama3) - 支持MCP工具
 pub async fn ollama_llama3(
     request: ChatRequest,
+    auth_user: AuthUser,  // 使用用户的API key
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
+    // 使用统一的API key获取逻辑 - 从Extension中获取
+    let user_api_key = auth_user.api_key.clone();
+
     // 1. 连接到 MCP 服务器
     let mcp_server_url = "http://127.0.0.1:10001/mcp".to_string();
-    let mcp_api_key = "tk_zaEVQtzrfFIXKh7EnBoja8KnGIfjV0T8".to_string();
+    let mcp_api_key = user_api_key.clone();
 
     // 使用StreamableHttpClientTransportConfig添加Authorization头
     tracing::info!("Connecting to MCP server at: {}", mcp_server_url);
@@ -181,17 +188,22 @@ pub async fn ollama_llama3(
     tracing::info!("Available MCP tools: {:?}", tools.iter().map(|t| &t.name).collect::<Vec<_>>());
 
     // 2. 创建 Ollama 客户端和 Agent
-    let system_prompt = request.system_prompt.as_deref().unwrap_or(
-        "你是一个材料方向的助理，擅长数学计算和使用工具进行计算。当需要查询任务或获取信息时，必须使用提供的工具。"
+    let default_prompt = format!(
+        "你是一个材料方向的助理，擅长数学计算和使用工具进行计算。\
+        \n\n重要：你的用户 CalphaMesh API key 是: {}\
+        \n当调用任何 calphamesh 工具时，必须在参数中包含 'api_key' 字段，值为这个 API key。",
+        user_api_key
     );
+
+    let system_prompt = request.system_prompt.as_deref().unwrap_or(&default_prompt);
     let temperature = request.temperature.unwrap_or(0.8);
 
     let mut agent_builder = providers::ollama::Client::new()
         .agent("qwen3:8b")
         .preamble(system_prompt)
         .temperature(temperature as f64)
-        .tool(rig::tools::ThinkTool)
-        .tool(rig::tools::ListTasks);
+        .tool(crate::server::mcp::tools::ThinkTool)
+        .tool(crate::server::mcp::tools::ListTasks);
         // .rmcp_tools(tools, mcp_client.peer().to_owned());
 
     let agent = agent_builder.build();

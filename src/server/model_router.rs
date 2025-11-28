@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use axum::Extension;
 
 use crate::server::models::{ChatRequest, ChatResponse, ErrorResponse};
 use crate::server::agent::{qwen, ollama, coating_optimization};
+use crate::server::middleware::auth::AuthUser;
 
 /// 模型路由器
 pub struct ModelRouter {
@@ -9,7 +11,7 @@ pub struct ModelRouter {
 }
 
 /// 处理器函数类型，返回(Response, ChatResponse)
-type HandlerFn = fn(ChatRequest) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(axum::response::Response, ChatResponse), ErrorResponse>> + Send>>;
+type HandlerFn = fn(ChatRequest, crate::server::middleware::auth::AuthUser) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(axum::response::Response, ChatResponse), ErrorResponse>> + Send>>;
 
 impl ModelRouter {
     /// 创建新的模型路由器
@@ -19,17 +21,17 @@ impl ModelRouter {
         };
 
         // 注册通义千问模型
-        router.register("qwen-plus", |req| Box::pin(qwen::qwen_plus(req)));
-        router.register("qwen-turbo", |req| Box::pin(qwen::qwen_turbo(req)));
-        router.register("qwen-max", |req| Box::pin(qwen::qwen_max(req)));
-        router.register("qwen-flash", |req| Box::pin(qwen::qwen_flash(req)));
-        router.register("qwq-plus", |req| Box::pin(qwen::qwq_plus(req)));
+        router.register("qwen-plus", |req, auth_user| Box::pin(qwen::qwen_plus(req, auth_user)));
+        router.register("qwen-turbo", |req, auth_user| Box::pin(qwen::qwen_turbo(req, auth_user)));
+        router.register("qwen-max", |req, auth_user| Box::pin(qwen::qwen_max(req, auth_user)));
+        router.register("qwen-flash", |req, auth_user| Box::pin(qwen::qwen_flash(req, auth_user)));
+        router.register("qwq-plus", |req, auth_user| Box::pin(qwen::qwq_plus(req, auth_user)));
 
         // 注册Ollama模型
-        router.register("ollama-qwen3-4b", |req| Box::pin(ollama::ollama_qwen3_4b(req)));
-        router.register("ollama-llama3", |req| Box::pin(ollama::ollama_llama3(req)));
+        router.register("ollama-qwen3-4b", |req, auth_user| Box::pin(ollama::ollama_qwen3_4b(req, auth_user)));
+        router.register("ollama-llama3", |req, auth_user| Box::pin(ollama::ollama_llama3(req, auth_user)));
 
-        router.register("coating", |req| Box::pin(coating_optimization::coating_optimization(req)));
+        router.register("coating", |req, auth_user| Box::pin(coating_optimization::coating_optimization(req, auth_user)));
         router
     }
 
@@ -39,7 +41,7 @@ impl ModelRouter {
     }
 
     /// 处理聊天请求并返回ChatResponse用于保存助手消息
-    pub async fn handle_chat_request_with_response(&self, request: ChatRequest) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
+    pub async fn handle_chat_request_with_response(&self, request: ChatRequest, auth_user: crate::server::middleware::auth::AuthUser) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
         let handler = self.handlers.get(&request.model)
             .ok_or_else(|| ErrorResponse {
                 error: "model_not_supported".to_string(),
@@ -50,7 +52,7 @@ impl ModelRouter {
                 timestamp: chrono::Utc::now(),
             })?;
 
-        handler(request).await
+        handler(request, auth_user).await
     }
 
     

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::server::models::*;
 use crate::server::request::handle_chat_request;
 use crate::server::mcp::McpAgent;
+use crate::server::middleware::auth::AuthUser;
 
 use rmcp::{model::{ClientInfo, ClientCapabilities, Implementation}, ServiceExt};
 use rmcp::transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig};
@@ -12,6 +13,7 @@ use rmcp::transport::{StreamableHttpClientTransport, streamable_http_client::Str
 /// 处理通义千问请求并返回ChatResponse (qwen-plus)
 pub async fn qwen_plus(
     request: ChatRequest,
+    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let model = &request.model;
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
@@ -29,6 +31,7 @@ pub async fn qwen_plus(
 /// 处理通义千问请求并返回ChatResponse (qwen-turbo)
 pub async fn qwen_turbo(
     request: ChatRequest,
+    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
@@ -43,6 +46,7 @@ pub async fn qwen_turbo(
 /// 处理通义千问请求并返回ChatResponse (qwen-max)
 pub async fn qwen_max(
     request: ChatRequest,
+    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
@@ -74,6 +78,7 @@ pub async fn qwen_max(
 /// 处理通义千问请求并返回ChatResponse (qwq-plus)
 pub async fn qwq_plus(
     request: ChatRequest,
+    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
@@ -88,6 +93,7 @@ pub async fn qwq_plus(
 
 pub async fn qwen_flash(
     request: ChatRequest,
+    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     // 1. 连接到 MCP 服务器
     let mcp_server_url = "http://127.0.0.1:10001/mcp".to_string();
@@ -155,9 +161,9 @@ pub async fn qwen_flash(
         .agent("qwen-flash")
         .preamble("你是一个有用的AI助手。当用户的请求需要查询任务状态、提交任务或获取信息时，你必须使用提供的工具来回答。不要猜测答案，要使用工具获取准确信息。")
         .temperature(0.8)
-        .rmcp_tools(tools, mcp_client.peer().to_owned());
-        // .tool(rig::tools::ThinkTool)
-        // .tool(rig::tools::ListTasks);
+        // .rmcp_tools(tools, mcp_client.peer().to_owned())
+        .tool(crate::server::mcp::tools::ThinkTool)
+        .tool(crate::server::mcp::tools::ListTasks);
 
     let raw_agent = agent_builder.build();
     
