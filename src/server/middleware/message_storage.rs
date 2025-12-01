@@ -20,9 +20,9 @@ use crate::server::{
     models::{ChatRequest, ChatResponse, StreamChunk, generate_conversation_id},
 };
 
-/// 消息记录中间件
+/// 消息存储中间件
 /// 负责拦截和保存聊天请求和响应
-pub struct MessageLogger;
+pub struct MessageStorage;
 
 /// 用于在请求处理过程中传递的消息上下文
 #[derive(Clone, Debug)]
@@ -33,9 +33,9 @@ pub struct MessageContext {
     pub should_save: bool,
 }
 
-impl MessageLogger {
-    /// 创建消息记录中间件
-    pub async fn log_messages(
+impl MessageStorage {
+    /// 创建消息存储中间件
+    pub async fn store_messages(
         State(state): State<ServerState>,
         Extension(auth_user): Extension<AuthUser>,
         mut request: Request,
@@ -47,7 +47,7 @@ impl MessageLogger {
             return Ok(next.run(request).await);
         }
 
-        debug!("MessageLogger: 拦截聊天请求");
+        debug!("MessageStorage: 拦截聊天请求");
 
         // 提取并解析请求体
         let (parts, body) = request.into_parts();
@@ -76,7 +76,7 @@ impl MessageLogger {
         // 将确定的 conversation_id 设置回请求中，确保一致性
         chat_request.conversation_id = Some(conversation_id.clone());
 
-        info!("MessageLogger: 处理对话 {} 的请求", conversation_id);
+        info!("MessageStorage: 处理对话 {} 的请求", conversation_id);
 
         // 保存用户消息
         let db = state.database.clone();
@@ -152,7 +152,7 @@ async fn handle_normal_response(
             ).await {
                 error!("Failed to save assistant message: {}", e);
             } else {
-                info!("MessageLogger: 已保存助手消息到对话 {}", context.conversation_id);
+                info!("MessageStorage: 已保存助手消息到对话 {}", context.conversation_id);
             }
         }
     }
@@ -183,7 +183,7 @@ async fn handle_streaming_response(
         return Ok(response);
     }
 
-    debug!("MessageLogger: 处理流式响应");
+    debug!("MessageStorage: 处理流式响应");
 
     // 创建一个新的流来包装原始响应流
     let (parts, body) = response.into_parts();
@@ -305,7 +305,7 @@ async fn handle_streaming_response(
             ).await {
                 error!("Failed to save streaming assistant message: {}", e);
             } else {
-                info!("MessageLogger: 已保存完整的流式助手消息到对话 {} (包含推理、工具调用等)", conversation_id);
+                info!("MessageStorage: 已保存完整的流式助手消息到对话 {} (包含推理、工具调用等)", conversation_id);
             }
         }
     };
@@ -326,7 +326,7 @@ async fn save_user_message(
     ensure_conversation_exists(db, conversation_id, user_id, &request.message, &request.model).await?;
 
     // 保存用户消息
-    info!("MessageLogger: 保存用户消息: {}", &request.message);
+    info!("MessageStorage: 保存用户消息: {}", &request.message);
     sqlx::query(
         r#"
         INSERT INTO messages (conversation_id, role, content, model, created_at)
@@ -340,7 +340,7 @@ async fn save_user_message(
     .execute(db.pool())
     .await?;
 
-    info!("MessageLogger: 已保存用户消息到对话 {}", conversation_id);
+    info!("MessageStorage: 已保存用户消息到对话 {}", conversation_id);
     Ok(())
 }
 

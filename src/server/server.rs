@@ -41,12 +41,12 @@ fn create_cors_layer() -> CorsLayer {
 pub async fn create_server(database: crate::server::database::DatabaseConnection) -> Router {
     let state = crate::server::handlers::chat::ServerState::new(database).await;
 
-    // 创建聊天路由，添加消息记录中间件（在认证之后）
+    // 创建聊天路由，添加消息存储中间件（在认证之后）
     let chat_route = Router::new()
         .route("/v1/chat", axum::routing::post(crate::server::handlers::chat_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            crate::server::middleware::message_logger::MessageLogger::log_messages,
+            crate::server::middleware::message_storage::MessageStorage::store_messages,
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -59,9 +59,13 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         Default::default(),
     );
     
-    // MCP 路由 - 先应用 MCP 服务，再应用 MCP 专用认证中间件（只对 POST 请求认证）
+    // MCP 路由 - 先应用 MCP 服务，再应用 MCP 数据存储中间件，最后应用认证中间件
     let mcp_route = Router::new()
         .nest_service("/mcp", mcp_service)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::server::middleware::mcp_storage::McpStorage::store_mcp_data,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::server::middleware::mcp_auth::McpAuthMiddleware::authenticate_request,
@@ -108,9 +112,13 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         tracing::info!("SSE 传输处理结束");
     });
 
-    // SSE MCP 路由 - 集成 SSE 路由器
+    // SSE MCP 路由 - 集成 SSE 路由器，添加数据存储和认证中间件
     let sse_mcp_route = Router::new()
         .nest_service("/sse", sse_router)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::server::middleware::mcp_storage::McpStorage::store_mcp_data,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::server::middleware::mcp_auth::McpAuthMiddleware::authenticate_request,
@@ -118,6 +126,7 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
 
     // 创建其他受保护的路由（只需要认证）
     let other_protected_routes = Router::new()
+        // 原有的API端点
         .route("/usage/stats", axum::routing::get(crate::server::handlers::get_usage_stats_handler))
         .route("/v1/conversations", axum::routing::get(crate::server::handlers::list_conversations_handler))
         .route("/v1/conversations", axum::routing::post(crate::server::handlers::create_conversation_handler))
@@ -127,6 +136,11 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         .route("/v1/conversations/{id}/messages", axum::routing::get(crate::server::handlers::list_messages_handler))
         .route("/v1/conversations/{id}/messages/{message_id}", axum::routing::get(crate::server::handlers::get_message_handler))
         .route("/v1/conversations/{id}/messages/{message_id}", axum::routing::delete(crate::server::handlers::delete_message_handler))
+        // MCP统计API端点
+        .route("/usage/mcp/stats", axum::routing::get(crate::server::handlers::mcp_stats::get_mcp_usage_stats_handler))
+        .route("/usage/mcp/sessions", axum::routing::get(crate::server::handlers::mcp_stats::get_mcp_sessions_handler))
+        .route("/usage/mcp/tool-calls", axum::routing::get(crate::server::handlers::mcp_stats::get_mcp_tool_calls_handler))
+        .route("/usage/comprehensive", axum::routing::get(crate::server::handlers::mcp_stats::get_comprehensive_stats_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::server::middleware::auth::AuthMiddleware::authenticate_request,

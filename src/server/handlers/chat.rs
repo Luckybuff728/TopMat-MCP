@@ -33,7 +33,7 @@ pub async fn chat_handler(
     Json(request): Json<ChatRequest>,
 ) -> Result<axum::response::Response, ErrorResponse> {
     let conversation_id = request.conversation_id.as_ref()
-        .expect("conversation_id should be set by MessageLogger middleware");
+        .expect("conversation_id should be set by MessageStorage middleware");
 
     info!(
         "收到聊天请求: model={}, stream={}, message={}, user_id={}, conversation_id={}",
@@ -41,8 +41,8 @@ pub async fn chat_handler(
     );
 
     // 处理聊天请求
-    // conversation_id 已由 MessageLogger 中间件确保存在
-    // 消息保存也由 MessageLogger 中间件自动处理
+    // conversation_id 已由 MessageStorage 中间件确保存在
+    // 消息保存也由 MessageStorage 中间件自动处理
     let (response, _chat_response) = crate::server::model_router::get_model_router()
         .handle_chat_request_with_response(request.clone(), auth_user)
         .await?;

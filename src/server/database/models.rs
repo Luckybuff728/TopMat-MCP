@@ -116,3 +116,81 @@ pub struct CreateMessageRequest {
     pub total_tokens: Option<i32>,
     pub metadata: Option<String>,
 }
+
+// ============== MCP 相关模型 ==============
+
+/// MCP会话记录
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+pub struct McpSession {
+    pub id: i64,
+    pub session_id: String,
+    pub user_id: i64,
+    pub transport_type: String,
+    pub client_info: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_activity_at: DateTime<Utc>,
+}
+
+/// MCP工具调用记录
+#[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
+pub struct McpToolCall {
+    pub id: i64,
+    pub user_id: i64,
+    pub session_id: Option<String>,
+    pub tool_name: String,
+    pub request_arguments: Option<String>,
+    pub response_result: Option<String>,
+    pub execution_time_ms: Option<i32>,
+    pub status: String,
+    pub error_message: Option<String>,
+    pub transport_type: String,
+    pub endpoint: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 创建MCP会话请求
+#[derive(Debug, Deserialize)]
+pub struct CreateMcpSessionRequest {
+    pub session_id: String,
+    pub user_id: i64,
+    pub transport_type: String,
+    pub client_info: Option<String>,
+}
+
+/// 创建MCP工具调用请求
+#[derive(Debug, Deserialize)]
+pub struct CreateMcpToolCallRequest {
+    pub user_id: i64,
+    pub session_id: Option<String>,
+    pub tool_name: String,
+    pub request_arguments: Option<String>,
+    pub response_result: Option<String>,
+    pub execution_time_ms: Option<i32>,
+    pub status: String,
+    pub error_message: Option<String>,
+    pub transport_type: String,
+    pub endpoint: String,
+}
+
+/// MCP工具调用统计
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpToolCallStats {
+    pub tool_name: String,
+    pub total_calls: i64,
+    pub success_calls: i64,
+    pub error_calls: i64,
+    pub avg_execution_time_ms: f64,
+    pub last_called_at: Option<DateTime<Utc>>,
+}
+
+/// MCP使用统计汇总
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpUsageStats {
+    pub total_sessions: i64,
+    pub total_tool_calls: i64,
+    pub unique_tools_used: i64,
+    pub success_rate: f64,
+    pub avg_session_duration_minutes: f64,
+    pub transport_type_counts: std::collections::HashMap<String, i64>,
+    pub most_used_tools: Vec<McpToolCallStats>,
+}

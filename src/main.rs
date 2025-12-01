@@ -8,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 读取日志级别配置
     let log_level = std::env::var("RUST_LOG")
-        .unwrap_or_else(|_| "info".to_string())
+        .unwrap_or_else(|_| "debug".to_string())
         .parse()
         .unwrap_or(tracing::Level::INFO);
 

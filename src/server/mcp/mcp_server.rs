@@ -24,6 +24,12 @@ impl TopMatMcpServer {
     pub fn new() -> Self {
         Self
     }
+
+    pub fn new_with_db(_database: Option<crate::server::database::DatabaseConnection>) -> Self {
+        // 注意：这里暂时不存储数据库实例，因为我们通过RequestContext传递
+        // 在实际部署时，可能需要重构为使用全局状态或依赖注入
+        Self
+    }
 }
 
 impl Default for TopMatMcpServer {
@@ -87,6 +93,13 @@ impl ServerHandler for TopMatMcpServer {
     ) -> Result<CallToolResult, McpError> {
         info!("调用工具: {}（单例模式）", name);
 
+        // 记录开始时间用于执行时间统计
+        let start_time = std::time::Instant::now();
+
+        // 提取用户信息和会话上下文
+        let (user_id, session_id, transport_type, endpoint) =
+            Self::extract_context_info(&context);
+
         // 为 calphamesh 工具自动注入 API key
         let mut modified_arguments = arguments;
         if name.starts_with("calphamesh_") {
@@ -110,7 +123,7 @@ impl ServerHandler for TopMatMcpServer {
                 warn!("RequestContext 中也没有 axum::http::request::Parts 扩展");
                 warn!("这表明 rmcp 框架没有正确传递 Axum 的 extensions");
             }
-            
+
         }
 
         // 将 arguments 转换为 JsonValue
@@ -121,19 +134,130 @@ impl ServerHandler for TopMatMcpServer {
         };
 
         // 调用工具（使用单例方法）
-        match ToolRegistry::call_tool(&name, args_value).await {
+        let execution_result = match ToolRegistry::call_tool(&name, args_value.clone()).await {
             Ok(result) => {
                 info!("工具 {} 执行成功", name);
+                let execution_time = start_time.elapsed().as_millis() as i32;
+
+                // 记录成功的工具调用
+                if let (Some(user_id), Some(transport_type), Some(endpoint)) =
+                    (user_id, transport_type.as_ref(), endpoint.as_ref()) {
+                    if let Err(e) = Self::record_tool_call_to_db(
+                        user_id,
+                        session_id.as_deref(),
+                        &name,
+                        &args_value,
+                        &serde_json::json!(result),
+                        execution_time,
+                        "success",
+                        None,
+                        transport_type,
+                        endpoint,
+                    ).await {
+                        warn!("记录工具调用成功结果失败: {}", e);
+                    }
+                }
+
                 Ok(CallToolResult::success(vec![Content::text(result)]))
             }
             Err(e) => {
                 tracing::error!("工具 {} 执行失败: {}", name, e);
+                let execution_time = start_time.elapsed().as_millis() as i32;
+
+                // 记录失败的工具调用
+                if let (Some(user_id), Some(transport_type), Some(endpoint)) =
+                    (user_id, transport_type.as_ref(), endpoint.as_ref()) {
+                    if let Err(e) = Self::record_tool_call_to_db(
+                        user_id,
+                        session_id.as_deref(),
+                        &name,
+                        &args_value,
+                        &serde_json::Value::Null,
+                        execution_time,
+                        "error",
+                        Some(&e.to_string()),
+                        transport_type,
+                        endpoint,
+                    ).await {
+                        warn!("记录工具调用错误结果失败: {}", e);
+                    }
+                }
+
                 Err(McpError::internal_error(
                     format!("Tool execution failed: {}", e),
                     None,
                 ))
             }
+        };
+
+        execution_result
+    }
+}
+
+impl TopMatMcpServer {
+    /// 从RequestContext中提取用户信息和会话上下文
+    fn extract_context_info(
+        context: &RequestContext<RoleServer>,
+    ) -> (Option<i64>, Option<String>, Option<String>, Option<String>) {
+        let mut user_id = None;
+        let mut session_id = None;
+        let mut transport_type = None;
+        let mut endpoint = None;
+
+        // 尝试从MCP会话上下文中获取信息
+        if let Some(mcp_context) = context.extensions.get::<crate::server::middleware::mcp_storage::McpSessionContext>() {
+            user_id = Some(mcp_context.user_id);
+            session_id = Some(mcp_context.session_id.clone());
+            transport_type = Some(mcp_context.transport_type.clone());
+            endpoint = Some(mcp_context.endpoint.clone());
         }
+
+        // 如果没有找到MCP上下文，尝试从AuthUser中获取用户信息
+        if user_id.is_none() {
+            if let Some(auth_user) = context.extensions.get::<crate::server::middleware::auth::AuthUser>() {
+                user_id = Some(auth_user.user_id as i64);
+            }
+        }
+
+        // 默认传输类型和端点（如果没有从中间件获取）
+        if transport_type.is_none() {
+            transport_type = Some("http".to_string());
+            endpoint = Some("/mcp".to_string());
+        }
+
+        (user_id, session_id, transport_type, endpoint)
+    }
+
+    /// 记录工具调用到数据库
+    async fn record_tool_call_to_db(
+        user_id: i64,
+        session_id: Option<&str>,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+        result: &serde_json::Value,
+        execution_time_ms: i32,
+        status: &str,
+        error_message: Option<&str>,
+        transport_type: &str,
+        endpoint: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // 注意：这里我们暂时不能直接访问数据库连接
+        // 因为MCP服务器运行在独立的环境中
+        // 实际的数据记录将在中间件层面完成
+        // 这里只是为了保持API一致性
+
+        info!(
+            "MCP工具调用记录: user_id={}, session_id={}, tool={}, status={}, time={}ms, transport={}, endpoint={}",
+            user_id,
+            session_id.unwrap_or("none"),
+            tool_name,
+            status,
+            execution_time_ms,
+            transport_type,
+            endpoint
+        );
+
+        Ok(())
     }
 }
 

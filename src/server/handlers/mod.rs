@@ -5,6 +5,7 @@ pub mod conversations;
 pub mod messages;
 pub mod usage;
 pub mod mcp;
+pub mod mcp_stats;
 
 pub use auth::auth_handler;
 pub use chat::chat_handler;
@@ -23,3 +24,9 @@ pub use messages::{
     add_message_handler,
 };
 pub use usage::{get_usage_stats_handler, health_check_handler};
+pub use mcp_stats::{
+    get_mcp_usage_stats_handler,
+    get_mcp_sessions_handler,
+    get_mcp_tool_calls_handler,
+    get_comprehensive_stats_handler,
+};

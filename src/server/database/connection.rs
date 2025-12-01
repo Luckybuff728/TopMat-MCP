@@ -166,6 +166,48 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // 创建MCP会话记录表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS mcp_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT UNIQUE NOT NULL,
+            user_id INTEGER NOT NULL,
+            transport_type TEXT NOT NULL,  -- 'http' 或 'sse'
+            client_info TEXT,  -- 客户端信息JSON
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_activity_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // 创建MCP工具调用记录表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS mcp_tool_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            session_id TEXT,
+            tool_name TEXT NOT NULL,
+            request_arguments TEXT,  -- JSON格式
+            response_result TEXT,    -- JSON格式
+            execution_time_ms INTEGER,
+            status TEXT NOT NULL,  -- 'success', 'error', 'timeout'
+            error_message TEXT,
+            transport_type TEXT NOT NULL,  -- 'http' 或 'sse'
+            endpoint TEXT NOT NULL,  -- '/mcp' 或 '/sse/mcp'
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (session_id) REFERENCES mcp_sessions (session_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     // 创建索引
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys (api_key)")
         .execute(pool)
@@ -181,6 +223,31 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_usage_stats_user_date ON usage_stats (user_id, request_date)")
+        .execute(pool)
+        .await?;
+
+    // 创建MCP相关索引
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_sessions_session_id ON mcp_sessions (session_id)")
+        .execute(pool)
+        .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_sessions_user_id ON mcp_sessions (user_id)")
+        .execute(pool)
+        .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_session_id ON mcp_tool_calls (session_id)")
+        .execute(pool)
+        .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_user_id ON mcp_tool_calls (user_id)")
+        .execute(pool)
+        .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_tool_name ON mcp_tool_calls (tool_name)")
+        .execute(pool)
+        .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_created_at ON mcp_tool_calls (created_at)")
         .execute(pool)
         .await?;
 

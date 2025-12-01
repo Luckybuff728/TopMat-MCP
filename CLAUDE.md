@@ -122,6 +122,8 @@ cargo watch -x "fmt && clippy && test"
 - **conversations**: Conversation metadata and management
 - **messages**: Chat message storage with role support
 - **usage_statistics**: Token usage and cost tracking
+- **mcp_sessions**: MCP session tracking with transport types and client info
+- **mcp_tool_calls**: Detailed MCP tool execution records with performance metrics
 
 ### MCP Tool System
 
@@ -200,7 +202,7 @@ DATABASE_URL=sqlite:/app/data/data.db  # Docker data path
 ```
 
 ### Default Configuration
-- Default model: `qwen3:4b`
+- Default model: `qwen-plus`
 - Default database: `sqlite:data.db`
 - Default server: `http://127.0.0.1:3000`
 - Docker container port mapping: `10007:3000`
@@ -218,6 +220,10 @@ DATABASE_URL=sqlite:/app/data/data.db  # Docker data path
 - `GET|PUT|DELETE /v1/conversations/:id` - Specific conversation operations
 - `GET /v1/conversations/:id/messages` - Message history
 - `GET /usage/stats` - Usage statistics
+- `GET /usage/mcp/stats` - MCP usage statistics and analytics
+- `GET /usage/mcp/sessions` - MCP session history with pagination
+- `GET /usage/mcp/tool-calls` - MCP tool execution records
+- `GET /usage/comprehensive` - Combined chat and MCP statistics
 
 ### MCP Endpoint
 - `/mcp/*` - Model Context Protocol server with specialized authentication
@@ -377,17 +383,20 @@ The server includes a sophisticated MCP (Model Context Protocol) implementation 
 
 ### Core Features
 - **StreamableHTTP Transport**: High-performance bidirectional communication
-- **SSE Support**: Server-sent events for real-time updates
-- **SSE Transport Alternative**: Additional SSE endpoint at `/sse/mcp/` for alternative transport
+- **SSE Support**: Server-sent events for real-time updates at `/sse/` endpoint
 - **Automatic Tool Registration**: Compile-time macro-based registration system
 - **Session Management**: Local session state with user context injection
 - **Custom Authentication**: GET requests for discovery, POST for execution
+- **Data Storage**: Comprehensive MCP session and tool call tracking with analytics
+- **Performance Monitoring**: Execution time tracking and success rate analytics
 
 ### Architecture Flow
 1. **Tool Discovery** (GET `/mcp/`): Returns available tools and their schemas
 2. **Tool Execution** (POST `/mcp/`): Executes tools with proper authentication
 3. **Session Context**: User information injected via MCP auth middleware
 4. **Response Streaming**: Real-time responses via SSE protocol
+5. **Data Persistence**: All MCP interactions stored to database for analytics
+6. **Performance Tracking**: Execution metrics and success rates recorded
 
 ### Material Science Integration
 - **Domain-Specific Tools**: Specialized for materials science workflows
