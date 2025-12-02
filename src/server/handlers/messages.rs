@@ -4,12 +4,70 @@ use axum::{
 };
 use tracing::{info, error, warn};
 use sqlx::Row;
+use utoipa::path;
+use serde_json::json;
 
 use crate::server::models::*;
 use crate::server::middleware::AuthUser;
 use super::chat::ServerState;
 
 /// 获取对话的消息历史
+#[utoipa::path(
+    get,
+    path = "/v1/conversations/{id}/messages",
+    tag = "conversations",
+    summary = "获取消息列表",
+    description = "获取指定对话的消息历史，支持分页查询。",
+    params(
+        ("id" = String, Path, description = "对话ID"),
+        ("limit" = i64, Query, description = "分页大小，默认50，最大100"),
+        ("offset" = i64, Query, description = "偏移量，默认0"),
+        ("before" = Option<i32>, Query, description = "获取指定消息ID之前的消息")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = MessageListResponse,
+         example = json!({
+             "messages": [
+                 {
+                     "id": 1,
+                     "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+                     "role": "user",
+                     "content": "你好，请介绍一下你自己",
+                     "model": null,
+                     "usage": null,
+                     "metadata": null,
+                     "created_at": "2024-01-01T12:00:00Z"
+                 },
+                 {
+                     "id": 2,
+                     "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+                     "role": "assistant",
+                     "content": "你好！我是一个AI助手，很高兴为您服务。",
+                     "model": "qwen-plus",
+                     "usage": {
+                         "prompt_tokens": 20,
+                         "completion_tokens": 15,
+                         "total_tokens": 35
+                     },
+                     "metadata": {"response_time_ms": 1500},
+                     "created_at": "2024-01-01T12:00:01Z"
+                 }
+             ],
+             "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+             "total": 2,
+             "page": 1,
+             "page_size": 50,
+             "total_pages": 1,
+             "has_more": false
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 404, description = "对话不存在或无权访问", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn list_messages_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
@@ -159,6 +217,40 @@ pub async fn list_messages_handler(
 }
 
 /// 获取单个消息详情
+#[utoipa::path(
+    get,
+    path = "/v1/conversations/{id}/messages/{message_id}",
+    tag = "conversations",
+    summary = "获取消息详情",
+    description = "获取指定对话中单个消息的详细信息。",
+    params(
+        ("id" = String, Path, description = "对话ID"),
+        ("message_id" = i32, Path, description = "消息ID")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = Message,
+         example = json!({
+             "id": 2,
+             "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+             "role": "assistant",
+             "content": "你好！我是一个AI助手，很高兴为您服务。",
+             "model": "qwen-plus",
+             "usage": {
+                 "prompt_tokens": 20,
+                 "completion_tokens": 15,
+                 "total_tokens": 35
+             },
+             "metadata": {"response_time_ms": 1500},
+             "created_at": "2024-01-01T12:00:01Z"
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 404, description = "消息不存在或无权访问", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_message_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
@@ -247,6 +339,33 @@ pub async fn get_message_handler(
 }
 
 /// 删除消息
+#[utoipa::path(
+    delete,
+    path = "/v1/conversations/{id}/messages/{message_id}",
+    tag = "conversations",
+    summary = "删除消息",
+    description = "删除指定对话中的单个消息。",
+    params(
+        ("id" = String, Path, description = "对话ID"),
+        ("message_id" = i32, Path, description = "消息ID")
+    ),
+    responses(
+        (status = 200, description = "删除成功", body = serde_json::Value,
+         example = json!({
+             "success": true,
+             "message": "消息删除成功",
+             "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+             "message_id": 2,
+             "timestamp": "2024-01-01T12:00:00Z"
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 404, description = "消息不存在或无权访问", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn delete_message_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,

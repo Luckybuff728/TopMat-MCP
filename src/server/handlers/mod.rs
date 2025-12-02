@@ -6,6 +6,7 @@ pub mod messages;
 pub mod usage;
 pub mod mcp;
 pub mod mcp_stats;
+pub mod mcp_docs;
 
 pub use auth::auth_handler;
 pub use chat::chat_handler;
@@ -29,4 +30,11 @@ pub use mcp_stats::{
     get_mcp_sessions_handler,
     get_mcp_tool_calls_handler,
     get_comprehensive_stats_handler,
+};
+pub use mcp_docs::{
+    mcp_info_handler,
+    mcp_tools_list_handler,
+    mcp_tool_call_handler,
+    sse_info_handler,
+    sse_message_handler,
 };

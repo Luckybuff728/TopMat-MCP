@@ -3,10 +3,12 @@ use tower_http::cors::{CorsLayer, Any};
 use std::sync::Arc;
 use regex::Regex;
 use rmcp::transport::streamable_http_server::{
-    StreamableHttpService, 
+    StreamableHttpService,
     session::local::LocalSessionManager,
 };
 use rmcp::transport::sse_server::SseServer;
+use utoipa_swagger_ui::SwaggerUi;
+use utoipa::OpenApi;
 
 // 重新导出模块，保持向后兼容性
 // pub use crate::server::handlers::{auth_handler, chat_handler};
@@ -77,17 +79,17 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
 
     // Create SSE server config
     // Note: bind address is required but won't be used when integrating router
+    // We don't set a global CancellationToken here since each connection gets its own
     let sse_config = SseServerConfig {
         bind: "127.0.0.1:0".parse().unwrap(), // Use port 0 to let OS choose unused port
         sse_path: "/".to_string(), // Root path for the SSE service
         post_path: "/message".to_string(),
-        ct: CancellationToken::new(),
+        ct: CancellationToken::new(), // This token won't be used for individual connections
         sse_keep_alive: None,
     };
     let (mut sse_server, sse_router) = SseServer::new(sse_config.clone());
 
-    // 启动任务来处理 SSE 传输，正确连接到 MCP 服务器
-    let ct = sse_config.ct.clone();
+    // 启动任务来处理 SSE 传输，为每个连接创建独立的 CancellationToken
     let _transport_handle = tokio::spawn(async move {
         use futures::StreamExt;
         use rmcp::service::serve_directly_with_ct;
@@ -97,11 +99,14 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
             transport_count += 1;
             tracing::info!("处理 SSE 传输 #{}", transport_count);
 
+            // 为每个连接创建独立的 CancellationToken
+            let connection_ct = tokio_util::sync::CancellationToken::new();
+
             // 创建 MCP 服务器实例
             let mcp_server = crate::server::mcp::create_mcp_server();
 
-            // 将传输连接到 MCP 服务器
-            let server = serve_directly_with_ct(mcp_server, transport, None, ct.clone());
+            // 将传输连接到 MCP 服务器，使用独立的 token
+            let server = serve_directly_with_ct(mcp_server, transport, None, connection_ct);
             tracing::info!("MCP 服务器启动成功，等待连接...");
 
             // 等待服务器结束
@@ -155,6 +160,21 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         // 健康检查
         .route("/health", axum::routing::get(crate::server::handlers::health_check_handler));
 
+    // 创建 Swagger UI 路由
+    let swagger_ui = SwaggerUi::new("/swagger-ui")
+        .url("/api-docs/openapi.json", crate::docs::ApiDoc::openapi())
+        .config(
+            utoipa_swagger_ui::Config::default()
+                .try_it_out_enabled(true)  // 启用"Try it out"功能
+                .display_request_duration(true)  // 显示请求耗时
+                .filter(true)  // 启用过滤功能
+                .deep_linking(true)  // 启用深度链接
+                .persist_authorization(true)  // 持久化认证信息
+                .with_credentials(true)  // 允许发送认证信息
+                .doc_expansion("list".to_string())  // 默认展开为列表视图
+                .show_mutated_request(true)  // 显示变更后的请求
+                .supported_submit_methods(["get", "post", "put", "delete", "patch"])  // 支持的HTTP方法
+        );
 
     Router::new()
         .merge(public_routes)
@@ -162,6 +182,7 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         .merge(mcp_route)
         .merge(sse_mcp_route)
         .merge(other_protected_routes)
+        .merge(swagger_ui)  // 添加 Swagger UI 路由
         .layer(create_cors_layer())
         .with_state(state)
 }

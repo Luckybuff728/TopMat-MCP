@@ -10,72 +10,50 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use sqlx::Row;
+use utoipa::path;
+use serde_json::json;
 
 use crate::server::{
     database::DatabaseConnection,
     handlers::chat::ServerState,
     middleware::auth::AuthUser,
-    models::ErrorResponse,
+    models::{ErrorResponse, McpStatsQuery, McpUsageStats, McpSessionInfo, McpToolCallInfo, ComprehensiveStats},
 };
 
-/// MCP统计查询参数
-#[derive(Debug, Deserialize, Clone)]
-pub struct McpStatsQuery {
-    /// 开始日期 (ISO 8601格式)
-    pub from_date: Option<String>,
-    /// 结束日期 (ISO 8601格式)
-    pub to_date: Option<String>,
-    /// 分页页码 (从1开始)
-    pub page: Option<i32>,
-    /// 每页数量
-    pub limit: Option<i32>,
-    /// 传输类型过滤 (http, sse)
-    pub transport_type: Option<String>,
-    /// 工具名称过滤
-    pub tool_name: Option<String>,
-}
-
-/// MCP使用统计汇总
-#[derive(Debug, Serialize, Clone)]
-pub struct McpUsageStats {
-    pub total_sessions: i64,
-    pub total_tool_calls: i64,
-    pub unique_tools_used: i64,
-    pub success_rate: f64,
-    pub transport_type_counts: serde_json::Value,
-}
-
-/// MCP会话信息
-#[derive(Debug, Serialize)]
-pub struct McpSessionInfo {
-    pub session_id: String,
-    pub transport_type: String,
-    pub tool_calls_count: i64,
-    pub created_at: String,
-    pub last_activity_at: String,
-}
-
-/// MCP工具调用信息
-#[derive(Debug, Serialize)]
-pub struct McpToolCallInfo {
-    pub session_id: Option<String>,
-    pub tool_name: String,
-    pub status: String,
-    pub transport_type: String,
-    pub endpoint: String,
-    pub execution_time_ms: Option<i32>,
-    pub created_at: String,
-}
-
-/// 综合使用统计
-#[derive(Debug, Serialize)]
-pub struct ComprehensiveStats {
-    pub mcp: McpUsageStats,
-    pub chat: serde_json::Value,
-    pub summary: serde_json::Value,
-}
-
 /// 获取MCP使用统计汇总
+#[utoipa::path(
+    get,
+    path = "/usage/mcp/stats",
+    tag = "usage",
+    summary = "获取MCP使用统计",
+    description = "获取当前用户的MCP工具使用统计信息，包括会话数、工具调用数、成功率等。",
+    params(
+        ("from_date" = Option<String>, Query, description = "开始日期 (ISO 8601格式)"),
+        ("to_date" = Option<String>, Query, description = "结束日期 (ISO 8601格式)"),
+        ("page" = Option<i32>, Query, description = "分页页码 (从1开始)"),
+        ("limit" = Option<i32>, Query, description = "每页数量"),
+        ("transport_type" = Option<String>, Query, description = "传输类型过滤 (http, sse)"),
+        ("tool_name" = Option<String>, Query, description = "工具名称过滤")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = McpUsageStats,
+         example = json!({
+             "total_sessions": 25,
+             "total_tool_calls": 150,
+             "unique_tools_used": 8,
+             "success_rate": 0.95,
+             "transport_type_counts": {
+                 "http": 80,
+                 "sse": 70
+             }
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_mcp_usage_stats_handler(
     State(state): State<ServerState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -176,6 +154,43 @@ pub async fn get_mcp_usage_stats_handler(
 }
 
 /// 获取MCP会话列表
+#[utoipa::path(
+    get,
+    path = "/usage/mcp/sessions",
+    tag = "usage",
+    summary = "获取MCP会话列表",
+    description = "获取当前用户的MCP会话历史，支持分页和过滤。",
+    params(
+        ("from_date" = Option<String>, Query, description = "开始日期 (ISO 8601格式)"),
+        ("to_date" = Option<String>, Query, description = "结束日期 (ISO 8601格式)"),
+        ("page" = Option<i32>, Query, description = "分页页码 (从1开始)"),
+        ("limit" = Option<i32>, Query, description = "每页数量"),
+        ("transport_type" = Option<String>, Query, description = "传输类型过滤 (http, sse)")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = serde_json::Value,
+         example = json!({
+             "sessions": [
+                 {
+                     "session_id": "sess_123456",
+                     "transport_type": "http",
+                     "tool_calls_count": 5,
+                     "created_at": "2024-01-01T12:00:00Z",
+                     "last_activity_at": "2024-01-01T12:30:00Z"
+                 }
+             ],
+             "total": 25,
+             "page": 1,
+             "page_size": 20,
+             "total_pages": 2
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_mcp_sessions_handler(
     State(state): State<ServerState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -260,6 +275,46 @@ pub async fn get_mcp_sessions_handler(
 }
 
 /// 获取MCP工具调用记录
+#[utoipa::path(
+    get,
+    path = "/usage/mcp/tool-calls",
+    tag = "usage",
+    summary = "获取MCP工具调用记录",
+    description = "获取当前用户的MCP工具调用历史记录，支持分页和过滤。",
+    params(
+        ("from_date" = Option<String>, Query, description = "开始日期 (ISO 8601格式)"),
+        ("to_date" = Option<String>, Query, description = "结束日期 (ISO 8601格式)"),
+        ("page" = Option<i32>, Query, description = "分页页码 (从1开始)"),
+        ("limit" = Option<i32>, Query, description = "每页数量"),
+        ("transport_type" = Option<String>, Query, description = "传输类型过滤 (http, sse)"),
+        ("tool_name" = Option<String>, Query, description = "工具名称过滤")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = serde_json::Value,
+         example = json!({
+             "tool_calls": [
+                 {
+                     "session_id": "sess_123456",
+                     "tool_name": "calpha_mesh_simulation",
+                     "status": "success",
+                     "transport_type": "http",
+                     "endpoint": "/mcp",
+                     "execution_time_ms": 1250,
+                     "created_at": "2024-01-01T12:15:00Z"
+                 }
+             ],
+             "total": 150,
+             "page": 1,
+             "page_size": 20,
+             "total_pages": 8
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_mcp_tool_calls_handler(
     State(state): State<ServerState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -335,6 +390,48 @@ pub async fn get_mcp_tool_calls_handler(
 }
 
 /// 获取综合使用统计
+#[utoipa::path(
+    get,
+    path = "/usage/comprehensive",
+    tag = "usage",
+    summary = "获取综合使用统计",
+    description = "获取包含聊天和MCP工具使用的综合统计信息。",
+    params(
+        ("from_date" = Option<String>, Query, description = "开始日期 (ISO 8601格式)"),
+        ("to_date" = Option<String>, Query, description = "结束日期 (ISO 8601格式)"),
+        ("period" = Option<String>, Query, description = "统计周期 (day/week/month)")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = ComprehensiveStats,
+         example = json!({
+             "mcp": {
+                 "total_sessions": 25,
+                 "total_tool_calls": 150,
+                 "unique_tools_used": 8,
+                 "success_rate": 0.95,
+                 "transport_type_counts": {
+                     "http": 80,
+                     "sse": 70
+                 }
+             },
+             "chat": {
+                 "total_requests": 300,
+                 "total_tokens": 15000,
+                 "avg_response_time_ms": 1250.0
+             },
+             "summary": {
+                 "total_api_calls": 450,
+                 "most_active_day": "2024-01-01",
+                 "cost_estimate": 2.50
+             }
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_comprehensive_stats_handler(
     State(state): State<ServerState>,
     Extension(auth_user): Extension<AuthUser>,

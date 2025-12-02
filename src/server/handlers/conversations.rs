@@ -4,12 +4,36 @@ use axum::{
 };
 use tracing::{info, error};
 use sqlx::Row;
+use utoipa::path;
+use serde_json::json;
 
 use crate::server::models::*;
 use crate::server::middleware::AuthUser;
 use super::chat::ServerState;
 
 /// 获取用户对话列表
+#[utoipa::path(
+    get,
+    path = "/v1/conversations",
+    tag = "conversations",
+    summary = "获取对话列表",
+    description = "获取当前用户的对话列表，支持分页和搜索功能。",
+    params(
+        ("limit" = i64, Query, description = "分页大小，默认20，最大100"),
+        ("offset" = i64, Query, description = "偏移量，默认0"),
+        ("conversation_id" = Option<String>, Query, description = "按会话ID筛选"),
+        ("search" = Option<String>, Query, description = "搜索关键词（搜索标题和摘要）")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = ConversationListResponse),
+        (status = 400, description = "请求参数错误", body = ErrorResponse),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn list_conversations_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
@@ -115,6 +139,33 @@ pub async fn list_conversations_handler(
 }
 
 /// 创建新对话
+#[utoipa::path(
+    post,
+    path = "/v1/conversations",
+    tag = "conversations",
+    summary = "创建新对话",
+    description = "创建一个新的对话会话，可选择设置标题、系统提示词和初始消息。",
+    request_body(
+        content = CreateConversationRequest,
+        description = "创建对话请求参数",
+        example = json!({
+            "conversation_id": null,
+            "title": "材料科学咨询",
+            "system_prompt": "你是一个专业的材料科学助手",
+            "initial_message": "请介绍一下金属材料的强度特性",
+            "model": "qwen-plus"
+        })
+    ),
+    responses(
+        (status = 200, description = "创建成功", body = CreateConversationResponse),
+        (status = 400, description = "请求参数错误", body = ErrorResponse),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn create_conversation_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
@@ -268,6 +319,25 @@ pub async fn create_conversation_handler(
 }
 
 /// 获取对话详情
+#[utoipa::path(
+    get,
+    path = "/v1/conversations/{id}",
+    tag = "conversations",
+    summary = "获取对话详情",
+    description = "获取指定对话的详细信息。",
+    params(
+        ("id" = String, Path, description = "对话ID")
+    ),
+    responses(
+        (status = 200, description = "请求成功", body = Conversation),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 404, description = "对话不存在", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_conversation_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
@@ -327,6 +397,33 @@ pub async fn get_conversation_handler(
 }
 
 /// 更新对话标题
+#[utoipa::path(
+    put,
+    path = "/v1/conversations/{id}/title",
+    tag = "conversations",
+    summary = "更新对话标题",
+    description = "更新指定对话的标题。",
+    params(
+        ("id" = String, Path, description = "对话ID")
+    ),
+    request_body(
+        content = UpdateConversationTitleRequest,
+        description = "更新对话标题请求",
+        example = json!({
+            "title": "新标题"
+        })
+    ),
+    responses(
+        (status = 200, description = "更新成功", body = Conversation),
+        (status = 400, description = "请求参数错误", body = ErrorResponse),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 404, description = "对话不存在", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn update_conversation_title_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,
@@ -425,6 +522,32 @@ pub async fn update_conversation_title_handler(
 }
 
 /// 删除对话
+#[utoipa::path(
+    delete,
+    path = "/v1/conversations/{id}",
+    tag = "conversations",
+    summary = "删除对话",
+    description = "删除指定的对话及其所有消息。",
+    params(
+        ("id" = String, Path, description = "对话ID")
+    ),
+    responses(
+        (status = 200, description = "删除成功", body = serde_json::Value,
+         example = json!({
+             "success": true,
+             "message": "对话删除成功",
+             "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+             "deleted_messages_count": 10,
+             "timestamp": "2024-01-01T12:00:00Z"
+         })),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 404, description = "对话不存在", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn delete_conversation_handler(
     Extension(auth_user): Extension<AuthUser>,
     State(state): State<ServerState>,

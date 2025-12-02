@@ -3,11 +3,24 @@ use axum::{
     response::Json,
 };
 use serde_json::Value;
+use utoipa::path;
 
 use crate::server::model_router::get_model_router;
+use crate::server::models::{ModelsResponse, ErrorResponse};
 use super::chat::ServerState;
 
 /// 获取可用模型列表
+#[utoipa::path(
+    get,
+    path = "/v1/models",
+    tag = "models",
+    summary = "获取模型列表",
+    description = "获取当前可用的AI模型列表，包括模型详细信息、性能参数和费用信息",
+    responses(
+        (status = 200, description = "获取成功", body = ModelsResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+)]
 pub async fn list_models_handler(
     State(_state): State<ServerState>,
 ) -> Json<Value> {

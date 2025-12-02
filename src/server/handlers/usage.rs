@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use futures_util::future::join_all;
 use tracing::{info, error};
 use sqlx::Row;
+use utoipa::path;
 
 use crate::server::models::{
     DetailedUsageStats, ErrorResponse, HealthCheckResponse, ServiceStatus,
@@ -16,6 +17,27 @@ use crate::server::database::connection::get_default_database_url;
 use super::chat::ServerState;
 
 /// 获取用户使用统计
+#[utoipa::path(
+    get,
+    path = "/usage/stats",
+    tag = "usage",
+    summary = "获取使用统计",
+    description = "获取指定时间段内的API使用统计信息，包括请求次数、Token使用量、费用等\n\n**认证方式**: Bearer Token\n```\nAuthorization: Bearer <your_api_key>\n```",
+    params(
+        ("period" = Option<String>, Query, description = "统计周期 (day/week/month)", example = "day"),
+        ("from_date" = Option<String>, Query, description = "开始日期 (ISO 8601格式)", example = "2024-12-01T00:00:00Z"),
+        ("to_date" = Option<String>, Query, description = "结束日期 (ISO 8601格式)", example = "2024-12-02T23:59:59Z")
+    ),
+    responses(
+        (status = 200, description = "获取统计成功", body = UsageStatsResponse),
+        (status = 401, description = "未授权 - API Key 缺失或无效", body = ErrorResponse),
+        (status = 403, description = "权限不足", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+    security(
+        ("bearerAuth" = [])
+    )
+)]
 pub async fn get_usage_stats_handler(
     State(state): State<ServerState>,
     Query(params): Query<UsageStatsQuery>,
@@ -178,6 +200,17 @@ pub async fn get_usage_stats_handler(
 }
 
 /// 健康检查接口
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "health",
+    summary = "健康检查",
+    description = "检查服务整体健康状态，包括数据库、缓存、AI模型等组件状态",
+    responses(
+        (status = 200, description = "健康检查成功", body = HealthCheckResponse),
+        (status = 500, description = "内部服务器错误", body = ErrorResponse)
+    ),
+)]
 pub async fn health_check_handler() -> Json<HealthCheckResponse> {
     // 检查数据库配置
     let database_config_status = check_database_config().await;

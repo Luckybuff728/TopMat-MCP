@@ -65,7 +65,37 @@ docker-compose logs -f topmat-llm
 curl http://localhost:10007/health
 ```
 
-**Note**: Dockerfile uses Debian Bookworm slim base image for optimal size.
+**Note**: Dockerfile uses Debian Bookworm slim base image for optimal size with multi-stage builds.
+
+## Project Structure
+
+### Core Architecture
+```
+TopMat-LLM/
+├── src/
+│   ├── main.rs                    # Application entry point with server initialization
+│   ├── docs.rs                    # OpenAPI/Swagger documentation configuration
+│   └── server/                    # Main server module
+│       ├── server.rs              # Router setup and middleware configuration
+│       ├── models.rs              # Core data structures and API models
+│       ├── handlers/              # HTTP request handlers for different endpoints
+│       ├── middleware/            # Authentication, logging, and MCP-specific middleware
+│       ├── database/              # SQLite database connection and models
+│       ├── agent/                 # AI model provider implementations
+│       │   └── examples/          # 96+ comprehensive agent examples
+│       └── mcp/                   # Model Context Protocol server
+│           ├── tool_registry.rs   # Runtime tool registration and management
+│           ├── tool_macros.rs     # Compile-time macro-based tool registration
+│           └── tools/             # Domain-specific material science tools
+├── rig/                           # Vendored rig-core workspace with RMCP support
+├── docs/                          # Additional documentation and design specs
+└── docker-compose.yml             # Production deployment configuration
+```
+
+### Configuration Files
+- **`.env`**: Environment variables for API keys and server settings (create locally)
+- **`Cargo.toml`**: Rust dependencies including RMCP v0.8, Axum v0.8, SQLx v0.7
+- **`docker-compose.yml`**: Production deployment with port mapping 10007:3000
 
 ## Development Workflow
 
@@ -95,6 +125,7 @@ cargo watch -x "fmt && clippy && test"
 - **Authentication**: External API service integration with MCP-specific auth
 - **Serialization**: Serde for JSON handling
 - **Streaming**: SSE (Server-Sent Events) for real-time responses
+- **Rust Edition**: 2024
 
 ### Key Components
 
@@ -116,7 +147,8 @@ cargo watch -x "fmt && clippy && test"
 3. Handler processes request → calls AI agent or MCP tool
 4. Response (streaming or non-streaming) → Client
 
-#### Database Schema
+##### Database Schema
+Database migrations are handled in `src/server/database/connection.rs`. Core tables:
 - **users**: User management with subscription levels
 - **api_keys**: API key management with expiration tracking
 - **conversations**: Conversation metadata and management
@@ -124,6 +156,12 @@ cargo watch -x "fmt && clippy && test"
 - **usage_statistics**: Token usage and cost tracking
 - **mcp_sessions**: MCP session tracking with transport types and client info
 - **mcp_tool_calls**: Detailed MCP tool execution records with performance metrics
+
+#### Key Configuration
+- **Rust Edition**: 2024 with modern async/await patterns
+- **Default Model**: `qwen3:4b` (configurable via environment)
+- **Database**: SQLite with async SQLx v0.7
+- **Documentation**: Auto-generated OpenAPI with Swagger UI at `/swagger-ui`
 
 ### MCP Tool System
 
@@ -147,6 +185,12 @@ The project features a sophisticated MCP (Model Context Protocol) tool system wi
 - **POST requests**: Authentication required (tool execution)
 - **Separate auth flow** from main REST API with dedicated middleware
 
+#### Tool Architecture
+- **Static Registration**: Compile-time tool registration using `register_mcp_tools!` macro
+- **Runtime Discovery**: Dynamic tool discovery and management via `ToolRegistry` singleton
+- **Type Safety**: Compile-time validation of tool signatures and parameters
+- **Error Handling**: Comprehensive error tracking and logging with execution metrics
+
 ### AI Provider Support
 
 #### Supported Models
@@ -165,16 +209,27 @@ The project includes an extensive collection of 96 agent examples in `src/server
 - **Enterprise Features**: OpenTelemetry integration, request hooks, custom evaluators
 
 #### Agent Implementation Pattern
-Each AI provider implements the same interface pattern in `src/server/agent/`:
+Each AI provider implements the standard handler function signature in `src/server/agent/`:
 ```rust
 pub async fn provider_model_with_response(
     request: ChatRequest,
 ) -> Result<(Response, ChatResponse), ErrorResponse>
 ```
 
+#### Agent Examples Collection
+The project includes 96+ comprehensive examples in `src/server/agent/examples/`:
+- **Basic examples**: `qwen_basic.rs`, `openai_streaming.rs`, `anthropic_streaming.rs`
+- **Tool integration**: `agent_with_tools.rs`, `qwen_tools.rs`, `rmcp.rs`
+- **Advanced patterns**: `multi_agent.rs`, `rag.rs`, `vector_search.rs`
+- **Domain-specific**: `pdf_agent.rs`, `image_generation.rs`, `transcription.rs`
+
+Run examples with: `cargo run --example example_name`
+
 ## Configuration
 
 ### Environment Variables
+Create a `.env` file in the project root:
+
 ```bash
 # Server (optional)
 SERVER_HOST=127.0.0.1
@@ -187,25 +242,35 @@ DATABASE_URL=sqlite:data.db
 # Authentication (optional)
 AUTH_API_URL=https://api.topmaterial-tech.com
 
-# AI Provider API Keys
-DASHSCOPE_API_KEY=your_dashscope_key  # Required for Qwen
-OLLAMA_BASE_URL=http://localhost:11434  # Required for Ollama
+# AI Provider API Keys (at least one required)
+DASHSCOPE_API_KEY=your_dashscope_key     # Required for Qwen models
+OLLAMA_BASE_URL=http://localhost:11434   # Required for Ollama models
+OPENAI_API_KEY=your_openai_key          # Optional: OpenAI models
+ANTHROPIC_API_KEY=your_anthropic_key    # Optional: Claude models
 
 # MCP Server Configuration (optional)
 MCP_SERVER_URL=http://127.0.0.1:10001/mcp  # External MCP server URL
-MCP_API_KEY=your_mcp_api_key  # MCP server authentication
+MCP_API_KEY=your_mcp_api_key               # MCP server authentication
 
-# Docker Environment
+# Docker Environment (for containerized deployment)
 TZ=Asia/Shanghai
-SERVER_HOST=0.0.0.0  # For Docker containers
-DATABASE_URL=sqlite:/app/data/data.db  # Docker data path
+SERVER_HOST=0.0.0.0                        # For Docker containers
+DATABASE_URL=sqlite:/app/data/data.db      # Docker data path
+```
+
+### Minimum Working Configuration
+Only these are required to get started:
+```bash
+DASHSCOPE_API_KEY=your_qwen_api_key
+DATABASE_URL=sqlite:data.db
 ```
 
 ### Default Configuration
-- Default model: `qwen-plus`
-- Default database: `sqlite:data.db`
-- Default server: `http://127.0.0.1:3000`
-- Docker container port mapping: `10007:3000`
+- **Default model**: `qwen3:4b`
+- **Default database**: `sqlite:data.db` (creates automatically)
+- **Default server**: `http://127.0.0.1:3000`
+- **Docker port mapping**: `10007:3000`
+- **API Documentation**: Available at `/swagger-ui` after server starts
 
 ## API Endpoints
 
@@ -346,36 +411,48 @@ cargo test test_name
 
 # Run tests in parallel
 cargo test --release
+
+# Run with coverage
+cargo tarpaulin --out Html
 ```
 
-### Testing Approach
+### Testing Strategy
 - **Unit Tests**: Located in individual modules with `#[cfg(test)]` sections
-- **Integration Tests**: Use the server's REST API endpoints
-- **Example Tests**: Agent examples can be run as integration tests
-- **Manual Testing**: Use curl commands or provided client examples
+- **Integration Tests**: Use the server's REST API endpoints and MCP protocols
+- **Example Validation**: 96+ agent examples serve as comprehensive integration tests
+- **Manual Testing**: Use Swagger UI at `/swagger-ui` or provided client examples
 
-### Unit Tests
+### Unit Test Pattern
 ```rust
 #[cfg(test)]
 mod tests {
     #[tokio::test]
     async fn test_handler() {
-        // Test implementation
+        // Test implementation with async support
     }
 }
 ```
 
-### MCP Tool Testing
-Use the extensive agent examples as reference implementations:
+### Agent Examples as Tests
+The extensive example collection serves as living documentation and tests:
 ```bash
-# Test specific agent examples
+# Test basic functionality
 cargo run --example qwen_basic
 cargo run --example agent_with_tools
 cargo run --example rmcp
+
+# Test streaming and advanced features
+cargo run --example openai_streaming_with_tools
+cargo run --example multi_agent
+cargo run --example rag
 ```
 
-### Integration Testing
-The project includes comprehensive API testing scripts in the repository root for validating endpoints and functionality.
+### API Testing with Swagger UI
+After starting the server, visit `http://localhost:3000/swagger-ui` for:
+- Interactive API documentation
+- Live API testing with authentication
+- Request/response validation
+- Schema exploration
 
 ## MCP Integration
 
@@ -406,11 +483,25 @@ The server includes a sophisticated MCP (Model Context Protocol) implementation 
 
 ## Security Considerations
 
-- API Key authentication via external service
-- MCP-specific authentication patterns (GET open, POST secured)
-- CORS configuration for cross-origin requests (currently permissive for development)
-- Input validation and sanitization
-- Database connection pooling
-- Error information sanitization in production responses
-- Tool execution sandboxing and resource limits
-- **Development Note**: CORS is configured as `very_permissive()` for development - should be restricted in production
+### Authentication & Authorization
+- **API Key Authentication**: External service integration via `AUTH_API_URL`
+- **MCP Authentication**: Dual-mode (GET open for discovery, POST secured for execution)
+- **User Context**: Injection of user information into MCP sessions for multi-tenancy
+
+### Development vs Production
+- **CORS Policy**: Currently `very_permissive()` for development - should be restricted in production
+- **Error Sanitization**: Detailed errors in development, sanitized responses in production
+- **Logging**: Configurable log levels via `RUST_LOG` environment variable
+
+### Data Protection
+- **Input Validation**: Comprehensive parameter validation and sanitization
+- **Database Security**: Connection pooling and prepared statements
+- **Tool Sandboxing**: Resource limits and execution time tracking for MCP tools
+- **Rate Limiting**: API key-based usage tracking and potential rate limiting
+
+### Production Deployment Notes
+- Use reverse proxy (nginx/Apache) for additional security headers
+- Configure proper CORS policies for your domain
+- Enable HTTPS/TLS in production environments
+- Monitor and restrict tool execution resources
+- Implement proper backup strategies for SQLite database

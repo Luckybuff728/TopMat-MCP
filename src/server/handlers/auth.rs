@@ -3,12 +3,26 @@ use axum::{
     response::IntoResponse,
 };
 use tracing::info;
+use utoipa::path;
 
 use crate::server::models::*;
 use crate::server::auth::{AuthClient, extract_api_key, create_auth_response, create_error_response, create_missing_api_key_response};
 use super::chat::ServerState;
 
 /// 鉴权端点处理
+#[utoipa::path(
+    post,
+    path = "/v1/auth",
+    tag = "auth",
+    summary = "API Key 鉴权",
+    description = "验证API Key的有效性并获取用户信息\n\n**认证方式**: Bearer Token\n```\nAuthorization: Bearer <your_api_key>\n```",
+    responses(
+        (status = 200, description = "鉴权成功", body = AuthResponse),
+        (status = 401, description = "API Key缺失、无效或已过期", body = ErrorResponse),
+        (status = 500, description = "服务器内部错误", body = ErrorResponse)
+    ),
+)]
+
 pub async fn auth_handler(
     State(state): State<ServerState>,
     request: Request,

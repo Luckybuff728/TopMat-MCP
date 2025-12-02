@@ -15,7 +15,7 @@ pub fn extract_api_key(request: &Request) -> Option<String> {
 pub fn extract_api_key_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
     use axum::http::header;
 
-    // 优先从Authorization header中提取
+    // 从Authorization header中提取Bearer token
     if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.to_lowercase().starts_with("bearer ") {
@@ -24,12 +24,6 @@ pub fn extract_api_key_from_headers(headers: &axum::http::HeaderMap) -> Option<S
         }
     }
 
-    // 从X-API-Key header中提取
-    if let Some(api_key_header) = headers.get("X-API-Key") {
-        if let Ok(api_key) = api_key_header.to_str() {
-            return Some(api_key.to_string());
-        }
-    }
     None
 }
 /// 创建鉴权成功响应
@@ -80,7 +74,7 @@ pub fn create_error_response(auth_error: AuthError) -> ErrorResponse {
 pub fn create_missing_api_key_response() -> ErrorResponse {
     ErrorResponse {
         error: "missing_api_key".to_string(),
-        message: "请求中缺少API Key，请在Authorization header中提供 'Bearer <api_key>' 或在X-API-Key header中提供".to_string(),
+        message: "请求中缺少API Key，请在Authorization header中提供 'Bearer <api_key>'".to_string(),
         details: None,
         timestamp: chrono::Utc::now(),
     }

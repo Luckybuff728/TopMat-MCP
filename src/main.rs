@@ -1,5 +1,6 @@
 use std::str::FromStr;
 mod server;
+mod docs;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

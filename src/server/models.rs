@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+use utoipa::ToSchema;
 
 /// 聊天请求结构
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ChatRequest {
     /// 用户输入的消息
     pub message: String,
@@ -35,7 +36,7 @@ fn default_model() -> String {
 }
 
 /// 聊天响应结构（非流式）
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ChatResponse {
     /// 响应内容
     pub content: String,
@@ -54,7 +55,7 @@ pub struct ChatResponse {
 }
 
 /// Token使用情况
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct TokenUsage {
     /// 提示词token数
     pub prompt_tokens: u32,
@@ -114,7 +115,7 @@ pub enum StreamChunk {
 }
 
 /// API错误响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     /// 错误类型
     pub error: String,
@@ -130,7 +131,7 @@ pub struct ErrorResponse {
 // ============== 鉴权相关数据结构 ==============
 
 /// 用户信息结构
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, ToSchema)]
 pub struct UserInfo {
     /// 用户ID
     pub id: u32,
@@ -219,7 +220,7 @@ impl std::error::Error for AuthError {}
 // ============== 对话历史管理相关 ==============
 
 /// 对话信息
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct Conversation {
     /// 对话ID
     pub conversation_id: Option<String>,
@@ -240,7 +241,7 @@ pub struct Conversation {
 }
 
 /// 消息信息
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct Message {
     /// 消息ID
     pub id: Option<i32>,
@@ -261,7 +262,7 @@ pub struct Message {
 }
 
 /// 创建对话请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateConversationRequest {
     /// 会话ID
     pub conversation_id: Option<String>,
@@ -276,7 +277,7 @@ pub struct CreateConversationRequest {
 }
 
 /// 对话列表查询参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ListConversationsQuery {
     /// 分页大小，默认20，最大100
     #[serde(default = "default_page_size")]
@@ -299,7 +300,7 @@ fn default_offset() -> i64 {
 }
 
 /// 对话列表响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ConversationListResponse {
     /// 对话列表
     pub conversations: Vec<Conversation>,
@@ -314,7 +315,7 @@ pub struct ConversationListResponse {
 }
 
 /// 消息列表查询参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ListMessagesQuery {
     /// 分页大小，默认50，最大100
     #[serde(default = "default_message_page_size")]
@@ -335,7 +336,7 @@ fn default_message_offset() -> i64 {
 }
 
 /// 消息列表响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct MessageListResponse {
     /// 消息列表
     pub messages: Vec<Message>,
@@ -354,7 +355,7 @@ pub struct MessageListResponse {
 }
 
 /// 创建对话响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct CreateConversationResponse {
     /// 对话信息
     pub conversation: Conversation,
@@ -363,16 +364,68 @@ pub struct CreateConversationResponse {
 }
 
 /// 更新对话标题请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateConversationTitleRequest {
     /// 新标题
     pub title: String,
 }
 
+// ============== 鉴权相关数据结构 ==============
+
+/// 身份认证请求
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct AuthRequest {
+    /// API 密钥
+    pub api_key: String,
+}
+
+/// 身份认证响应
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct AuthResponse {
+    /// 认证是否成功
+    pub success: bool,
+    /// 用户信息
+    pub user: Option<UserInfo>,
+    /// 访问令牌
+    pub token: Option<String>,
+    /// 错误信息（如果失败）
+    pub error: Option<String>,
+}
+
+// ============== 模型相关数据结构 ==============
+
+/// 模型信息
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ModelInfo {
+    /// 模型名称
+    pub name: String,
+    /// 提供商
+    pub provider: String,
+    /// 描述
+    pub description: String,
+    /// 是否支持流式
+    pub supports_streaming: bool,
+    /// 最大token数
+    pub max_tokens: u32,
+    /// 每1k token费用
+    pub cost_per_1k_tokens: f64,
+}
+
+/// 模型列表响应
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ModelsResponse {
+    /// 模型列表
+    pub models: Vec<ModelInfo>,
+    /// 总数量
+    pub total: i32,
+    /// 时间戳
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 // ============== 使用统计相关数据结构 ==============
 
 /// 使用统计查询参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UsageStatsQuery {
     /// 开始日期 (ISO 8601格式)
     pub from_date: Option<String>,
@@ -383,7 +436,7 @@ pub struct UsageStatsQuery {
 }
 
 /// 使用统计数据
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UsageStats {
     /// 模型名称
     pub model: String,
@@ -396,7 +449,7 @@ pub struct UsageStats {
 }
 
 /// 详细使用统计响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UsageStatsResponse {
     /// 统计周期
     pub period: String,
@@ -409,7 +462,7 @@ pub struct UsageStatsResponse {
 }
 
 /// 详细使用统计
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct DetailedUsageStats {
     /// 总请求数
     pub total_requests: u64,
@@ -426,7 +479,7 @@ pub struct DetailedUsageStats {
 // ============== 健康检查相关数据结构 ==============
 
 /// 服务健康状态
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ServiceStatus {
     /// 健康
@@ -438,7 +491,7 @@ pub enum ServiceStatus {
 }
 
 /// 健康检查响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct HealthCheckResponse {
     /// 整体状态
     pub status: ServiceStatus,
@@ -451,7 +504,7 @@ pub struct HealthCheckResponse {
 }
 
 /// 服务状态详情
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ServicesStatus {
     /// 数据库状态
     pub database: ServiceStatus,
@@ -459,6 +512,63 @@ pub struct ServicesStatus {
     pub cache: ServiceStatus,
     /// AI模型状态
     pub ai_models: std::collections::HashMap<String, ServiceStatus>,
+}
+
+/// MCP统计查询参数
+#[derive(Debug, Deserialize, Clone, ToSchema)]
+pub struct McpStatsQuery {
+    /// 开始日期 (ISO 8601格式)
+    pub from_date: Option<String>,
+    /// 结束日期 (ISO 8601格式)
+    pub to_date: Option<String>,
+    /// 分页页码 (从1开始)
+    pub page: Option<i32>,
+    /// 每页数量
+    pub limit: Option<i32>,
+    /// 传输类型过滤 (http, sse)
+    pub transport_type: Option<String>,
+    /// 工具名称过滤
+    pub tool_name: Option<String>,
+}
+
+/// MCP使用统计汇总
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct McpUsageStats {
+    pub total_sessions: i64,
+    pub total_tool_calls: i64,
+    pub unique_tools_used: i64,
+    pub success_rate: f64,
+    pub transport_type_counts: serde_json::Value,
+}
+
+/// MCP会话信息
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpSessionInfo {
+    pub session_id: String,
+    pub transport_type: String,
+    pub tool_calls_count: i64,
+    pub created_at: String,
+    pub last_activity_at: String,
+}
+
+/// MCP工具调用信息
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpToolCallInfo {
+    pub session_id: Option<String>,
+    pub tool_name: String,
+    pub status: String,
+    pub transport_type: String,
+    pub endpoint: String,
+    pub execution_time_ms: Option<i32>,
+    pub created_at: String,
+}
+
+/// 综合使用统计
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ComprehensiveStats {
+    pub mcp: McpUsageStats,
+    pub chat: serde_json::Value,
+    pub summary: serde_json::Value,
 }
 
 /// 模型健康信息
@@ -486,4 +596,95 @@ pub fn generate_conversation_id() -> String {
 /// 验证会话ID格式
 pub fn is_valid_conversation_id(id: &str) -> bool {
     id.parse::<Uuid>().is_ok()
+}
+
+// ============== MCP 相关数据结构 ==============
+
+/// MCP 服务器信息
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct McpServerInfo {
+    /// 服务器名称
+    pub name: String,
+    /// 版本号
+    pub version: String,
+    /// 协议版本
+    pub protocol_version: String,
+    /// 服务器标题
+    pub title: Option<String>,
+    /// 网站地址
+    pub website_url: Option<String>,
+}
+
+/// MCP 工具信息
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct McpToolInfo {
+    /// 工具名称
+    pub name: String,
+    /// 工具描述
+    pub description: String,
+    /// 工具输入模式 (JSON Schema)
+    pub input_schema: serde_json::Value,
+    /// 工具类别
+    pub category: Option<String>,
+}
+
+/// MCP 工具调用请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct McpToolCallRequest {
+    /// 工具名称
+    pub name: String,
+    /// 工具参数
+    pub arguments: serde_json::Value,
+}
+
+/// MCP 工具调用响应
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpToolCallResponse {
+    /// 调用结果
+    pub content: Vec<McpContent>,
+    /// 是否工具出错
+    pub isError: Option<bool>,
+}
+
+/// MCP 内容块
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct McpContent {
+    /// 内容类型
+    #[serde(rename = "type")]
+    pub content_type: String,
+    /// 文本内容
+    pub text: Option<String>,
+    /// 数据内容
+    pub data: Option<serde_json::Value>,
+}
+
+/// MCP 初始化请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct McpInitializeRequest {
+    /// 协议版本
+    pub protocolVersion: String,
+    /// 能力信息
+    pub capabilities: serde_json::Value,
+    /// 客户端信息
+    pub clientInfo: McpClientInfo,
+}
+
+/// MCP 客户端信息
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct McpClientInfo {
+    /// 客户端名称
+    pub name: String,
+    /// 客户端版本
+    pub version: String,
+}
+
+/// MCP 初始化响应
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpInitializeResponse {
+    /// 协议版本
+    pub protocolVersion: String,
+    /// 能力信息
+    pub capabilities: serde_json::Value,
+    /// 服务器信息
+    pub serverInfo: McpServerInfo,
 }
