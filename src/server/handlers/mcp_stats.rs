@@ -72,7 +72,7 @@ pub async fn get_mcp_usage_stats_handler(
         error: "database_error".to_string(),
         message: "查询会话统计失败".to_string(),
         details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })?;
 
     // 获取工具调用统计
@@ -86,7 +86,7 @@ pub async fn get_mcp_usage_stats_handler(
         error: "database_error".to_string(),
         message: "查询工具调用统计失败".to_string(),
         details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })?;
 
     // 获取成功调用数量
@@ -100,7 +100,7 @@ pub async fn get_mcp_usage_stats_handler(
         error: "database_error".to_string(),
         message: "查询成功调用统计失败".to_string(),
         details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })?;
 
     // 获取唯一工具数量
@@ -114,7 +114,7 @@ pub async fn get_mcp_usage_stats_handler(
         error: "database_error".to_string(),
         message: "查询唯一工具统计失败".to_string(),
         details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })?;
 
     // 获取传输类型统计
@@ -128,7 +128,7 @@ pub async fn get_mcp_usage_stats_handler(
         error: "database_error".to_string(),
         message: "查询传输类型统计失败".to_string(),
         details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })?;
 
     let mut transport_counts = serde_json::Map::new();
@@ -217,7 +217,7 @@ pub async fn get_mcp_sessions_handler(
             error: "database_error".to_string(),
             message: "查询会话总数失败".to_string(),
             details: Some(serde_json::json!({ "error": e.to_string() })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         })?;
 
     // 获取会话列表
@@ -235,15 +235,15 @@ pub async fn get_mcp_sessions_handler(
             error: "database_error".to_string(),
             message: "查询会话列表失败".to_string(),
             details: Some(serde_json::json!({ "error": e.to_string() })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         })?;
 
     let mut session_list: Vec<McpSessionInfo> = Vec::new();
     for row in sessions {
         let session_id: String = row.try_get("session_id").unwrap_or_default();
         let transport_type: String = row.try_get("transport_type").unwrap_or_default();
-        let created_at: String = row.try_get("created_at").unwrap_or_default();
-        let last_activity_at: String = row.try_get("last_activity_at").unwrap_or_default();
+        let created_at: chrono::DateTime<chrono::Local> = row.try_get("created_at").unwrap_or_else(|_| chrono::Local::now());
+        let last_activity_at: chrono::DateTime<chrono::Local> = row.try_get("last_activity_at").unwrap_or_else(|_| chrono::Local::now());
 
         // 获取每个会话的工具调用数量
         let tool_calls_count: i64 = sqlx::query_scalar(
@@ -344,7 +344,7 @@ pub async fn get_mcp_tool_calls_handler(
             error: "database_error".to_string(),
             message: "查询工具调用总数失败".to_string(),
             details: Some(serde_json::json!({ "error": e.to_string() })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         })?;
 
     // 获取工具调用记录
@@ -362,7 +362,7 @@ pub async fn get_mcp_tool_calls_handler(
             error: "database_error".to_string(),
             message: "查询工具调用记录失败".to_string(),
             details: Some(serde_json::json!({ "error": e.to_string() })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         })?;
 
     let mut call_list: Vec<McpToolCallInfo> = Vec::new();
@@ -374,7 +374,7 @@ pub async fn get_mcp_tool_calls_handler(
             transport_type: row.try_get("transport_type").unwrap_or_default(),
             endpoint: row.try_get("endpoint").unwrap_or_default(),
             execution_time_ms: row.try_get("execution_time_ms").ok(),
-            created_at: row.try_get("created_at").unwrap_or_default(),
+            created_at: row.try_get("created_at").unwrap_or_else(|_| chrono::Local::now()),
         });
     }
 

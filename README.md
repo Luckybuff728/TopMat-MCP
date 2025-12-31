@@ -1,7 +1,6 @@
 # TopMat-LLM 🦀
 
 [![Rust](https://img.shields.io/badge/rust-2024-blue.svg)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com)
 
 基于 Rust Edition 2024 构建的高性能统一 LLM 聊天服务器，为多个 AI 模型提供商提供标准化的 REST API 接口。支持对话管理、数据持久化、实时监控以及 MCP（模型上下文协议）集成，配备专业的材料科学工具和领域特定功能。
@@ -34,6 +33,8 @@
 - **API Key 认证**: 外部认证服务集成，支持用户级权限管理
 - **CORS 配置**: 开发环境宽松，生产环境可配置
 - **错误处理**: 统一错误响应格式，详细的日志记录
+- **时区本地化**: 系统统一以 UTC 存储，应用层（日志/响应）自动转换为北京时间 (UTC+8)
+- **MCP权鉴**: 新增 `McpAuthMiddleware`，为工具发现与执行提供细粒度的权限控制
 
 ## 📋 目录
 
@@ -181,6 +182,7 @@ DATABASE_URL=sqlite:data.db
 - **数据库**: 自动创建 SQLite 文件
 - **日志级别**: `info` (可通过 `RUST_LOG` 调整)
 - **API 文档**: 启动后访问 `/swagger-ui`
+- **时区配置**: 默认 `Asia/Shanghai` (北京时间)，支持日志与响应本地化
 
 ## 📡 API 使用
 
@@ -483,6 +485,7 @@ curl -X GET http://localhost:3000/usage/comprehensive \
 - 外部 API 服务状态
 - MCP 工具可用性
 - 性能指标
+- **本地化日志**: 所有系统日志均采用 ISO 8601 本地时间格式 (UTC+8)
 
 ## 🤝 贡献指南
 
@@ -503,9 +506,6 @@ curl -X GET http://localhost:3000/usage/comprehensive \
 - 提交 PR 前确保所有测试通过
 - 使用约定式提交消息
 
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
 
 ## 🆘 支持
 

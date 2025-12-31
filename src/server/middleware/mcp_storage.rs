@@ -86,6 +86,7 @@ impl McpStorage {
         let session_context = if let Some(auth_user) = request.extensions().get::<AuthUser>() {
             // 生成会话ID（如果没有的话）
             let session_id = self::generate_session_id(&request, &(auth_user.user_id as i64));
+            debug!("McpStorage: 使用会话ID: {}", session_id);
 
             // 创建MCP会话上下文
             let context = McpSessionContext {
@@ -127,7 +128,7 @@ impl McpStorage {
                         details: Some(serde_json::json!({
                             "error": format!("{}", e)
                         })),
-                        timestamp: chrono::Utc::now(),
+                        timestamp: chrono::Local::now(),
                     });
                 }
             };
@@ -420,31 +421,31 @@ fn generate_session_id(request: &Request, user_id: &i64) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    // 尝试从请求头中提取会话ID
-    if let Some(session_id) = request.headers().get("X-MCP-Session-ID")
+    // 1. 优先使用客户端提供的会话ID（Cherry Studio 发送全小写 header）
+    if let Some(session_id) = request.headers().get("mcp-session-id")
         .and_then(|v| v.to_str().ok()) {
+            info!("McpStorage: 使用客户端提供的会话ID: {}", session_id);
         return session_id.to_string();
     }
 
-    // 从用户代理和路径生成唯一ID
+    // 2. 基于稳定标识符生成会话ID（不包含时间戳）
     let mut hasher = DefaultHasher::new();
+    
+    // 对用户ID进行哈希
+    user_id.hash(&mut hasher);
+    
+    // 对路径进行哈希（区分 /mcp 和 /sse）
     request.uri().path().hash(&mut hasher);
+    
+    // 对用户代理进行哈希（同一客户端产生相同的ID）
     request.headers()
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .hash(&mut hasher);
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+        .unwrap_or("unknown")
         .hash(&mut hasher);
 
-    format!("mcp_{}_{}_{}",
-        user_id,
-        chrono::Utc::now().format("%Y%m%d_%H%M%S"),
-        hasher.finish()
-    )
+    // 生成稳定的会话ID（格式：mcp_用户ID_哈希值）
+    format!("mcp_{}_{}", user_id, hasher.finish())
 }
 
 /// 提取客户端信息

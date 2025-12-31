@@ -176,8 +176,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             transport_type TEXT NOT NULL,  -- 'http' 或 'sse'
             client_info TEXT,  -- 客户端信息JSON
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_activity_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            last_activity_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         "#,
     )
@@ -199,9 +198,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             error_message TEXT,
             transport_type TEXT NOT NULL,  -- 'http' 或 'sse'
             endpoint TEXT NOT NULL,  -- '/mcp' 或 '/sse/mcp'
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            FOREIGN KEY (session_id) REFERENCES mcp_sessions (session_id)
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         "#,
     )

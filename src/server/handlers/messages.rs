@@ -93,7 +93,7 @@ pub async fn list_messages_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -105,7 +105,7 @@ pub async fn list_messages_handler(
             details: Some(serde_json::json!({
                 "conversation_id": conversation_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -145,7 +145,7 @@ pub async fn list_messages_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -172,8 +172,8 @@ pub async fn list_messages_handler(
                     None
                 },
                 metadata,
-                created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                    .unwrap_or_else(|_| chrono::Utc::now()),
+                created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+                    .unwrap_or_else(|_| chrono::Local::now()),
             }
         })
         .collect();
@@ -194,7 +194,7 @@ pub async fn list_messages_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -275,7 +275,7 @@ pub async fn get_message_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -288,7 +288,7 @@ pub async fn get_message_handler(
                 "conversation_id": conversation_id,
                 "message_id": message_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -308,7 +308,7 @@ pub async fn get_message_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -331,8 +331,8 @@ pub async fn get_message_handler(
             None
         },
         metadata,
-        created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
     };
 
     Ok(Json(message))
@@ -390,7 +390,7 @@ pub async fn delete_message_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -403,7 +403,7 @@ pub async fn delete_message_handler(
                 "conversation_id": conversation_id,
                 "message_id": message_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -422,7 +422,7 @@ pub async fn delete_message_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -436,7 +436,7 @@ pub async fn delete_message_handler(
                 "message_id": message_id,
                 "conversation_id": conversation_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -445,7 +445,7 @@ pub async fn delete_message_handler(
         "message": "消息删除成功",
         "message_id": message_id,
         "conversation_id": conversation_id,
-        "timestamp": chrono::Utc::now()
+        "timestamp": chrono::Local::now()
     })))
 }
 
@@ -475,7 +475,7 @@ pub async fn add_message_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -487,7 +487,7 @@ pub async fn add_message_handler(
             details: Some(serde_json::json!({
                 "conversation_id": conversation_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -508,7 +508,7 @@ pub async fn add_message_handler(
         .bind(request.usage.as_ref().map(|u| u.completion_tokens))
         .bind(request.usage.as_ref().map(|u| u.total_tokens))
         .bind(metadata_str)
-        .bind(chrono::Utc::now())
+        .bind(chrono::Local::now())
         .execute(state.database.pool())
         .await
         .map_err(|e| {
@@ -519,7 +519,7 @@ pub async fn add_message_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -528,7 +528,7 @@ pub async fn add_message_handler(
     // 更新对话的消息计数和更新时间
     let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = ? WHERE conversation_id = ?";
     sqlx::query(update_sql)
-        .bind(chrono::Utc::now())
+        .bind(chrono::Local::now())
         .bind(&conversation_id)
         .execute(state.database.pool())
         .await
@@ -540,7 +540,7 @@ pub async fn add_message_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -552,7 +552,7 @@ pub async fn add_message_handler(
         model: request.model,
         usage: request.usage,
         metadata: request.metadata,
-        created_at: chrono::Utc::now(),
+        created_at: chrono::Local::now(),
     };
 
     Ok(Json(message))

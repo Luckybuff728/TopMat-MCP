@@ -127,7 +127,7 @@ pub async fn qwen_flash(
             error: "INTERNAL_SERVER_ERROR".to_string(),
             message: format!("Failed to connect to MCP server: {}", e),
             details: None,
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -147,7 +147,7 @@ pub async fn qwen_flash(
                 error: "INTERNAL_SERVER_ERROR".to_string(),
                 message: format!("Failed to list MCP tools: {}", e),
                 details: None,
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?
         .tools;

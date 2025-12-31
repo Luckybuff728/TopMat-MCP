@@ -82,7 +82,7 @@ pub async fn list_conversations_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -96,10 +96,10 @@ pub async fn list_conversations_handler(
             model: row.try_get::<String, _>("model").unwrap_or_default(),
             message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
             summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-            created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                .unwrap_or_else(|_| chrono::Utc::now()),
-            updated_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
-                .unwrap_or_else(|_| chrono::Utc::now()),
+            created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+                .unwrap_or_else(|_| chrono::Local::now()),
+            updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+                .unwrap_or_else(|_| chrono::Local::now()),
         })
         .collect();
 
@@ -119,7 +119,7 @@ pub async fn list_conversations_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -185,7 +185,7 @@ pub async fn create_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -216,7 +216,7 @@ pub async fn create_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -243,7 +243,7 @@ pub async fn create_conversation_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })?;
 
@@ -255,7 +255,7 @@ pub async fn create_conversation_handler(
             model: Some(model.to_string()),
             usage: None,
             metadata: None,
-            created_at: chrono::Utc::now(),
+            created_at: chrono::Local::now(),
         })
     } else {
         None
@@ -270,7 +270,7 @@ pub async fn create_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -293,7 +293,7 @@ pub async fn create_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -304,10 +304,10 @@ pub async fn create_conversation_handler(
         model: row.try_get::<String, _>("model").unwrap_or_default(),
         message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
         summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-        created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
-        updated_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
+        updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
     };
 
     info!("成功创建对话: conversation_id={}, title={:?}", conversation_id, request.title);
@@ -366,7 +366,7 @@ pub async fn get_conversation_handler(
                 details: Some(serde_json::json!({
                     "conversation_id": conversation_id
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         } else {
             ErrorResponse {
@@ -375,7 +375,7 @@ pub async fn get_conversation_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         }
     })?;
@@ -387,10 +387,10 @@ pub async fn get_conversation_handler(
         model: row.try_get::<String, _>("model").unwrap_or_default(),
         message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
         summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-        created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
-        updated_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
+        updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
     };
 
     Ok(Json(conversation))
@@ -455,7 +455,7 @@ pub async fn update_conversation_title_handler(
                 details: Some(serde_json::json!({
                     "conversation_id": conversation_id
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         } else {
             ErrorResponse {
@@ -464,7 +464,7 @@ pub async fn update_conversation_title_handler(
                 details: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         }
     })?;
@@ -476,7 +476,7 @@ pub async fn update_conversation_title_handler(
             details: Some(serde_json::json!({
                 "conversation_id": conversation_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -499,7 +499,7 @@ pub async fn update_conversation_title_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -510,10 +510,10 @@ pub async fn update_conversation_title_handler(
         model: row.try_get::<String, _>("model").unwrap_or_default(),
         message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
         summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-        created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
-        updated_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
+        updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+            .unwrap_or_else(|_| chrono::Local::now()),
     };
 
     info!("成功更新对话标题: conversation_id={}, title={:?}", conversation_id, request.title);
@@ -564,7 +564,7 @@ pub async fn delete_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -583,7 +583,7 @@ pub async fn delete_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -603,7 +603,7 @@ pub async fn delete_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -616,7 +616,7 @@ pub async fn delete_conversation_handler(
             details: Some(serde_json::json!({
                 "error": e.to_string()
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         }
     })?;
 
@@ -627,7 +627,7 @@ pub async fn delete_conversation_handler(
             details: Some(serde_json::json!({
                 "conversation_id": conversation_id
             })),
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         });
     }
 
@@ -640,6 +640,6 @@ pub async fn delete_conversation_handler(
         "message": "对话删除成功",
         "conversation_id": conversation_id,
         "deleted_messages_count": deleted_messages_count,
-        "timestamp": chrono::Utc::now()
+        "timestamp": chrono::Local::now()
     })))
 }

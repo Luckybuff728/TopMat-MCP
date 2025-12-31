@@ -15,6 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 初始化日志
     tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
         .with_max_level(log_level)
         .init();
 

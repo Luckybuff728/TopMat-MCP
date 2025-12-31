@@ -119,7 +119,7 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
                 model: request.model,
                 usage: None,
                 conversation_id: request.conversation_id.expect("conversation_id should exist"),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
                 metadata: HashMap::new(),
             };
             Ok((Json(chat_response.clone()).into_response(), chat_response))
@@ -129,7 +129,7 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
                 error: "chat_failed".to_string(),
                 message: format!("聊天处理失败: {}", e),
                 details: None,
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             })
         }
     }
@@ -234,7 +234,7 @@ where
                         }),
                         conversation_id: conversation_id.clone()
                             .unwrap_or_else(|| crate::server::models::generate_conversation_id()),
-                        timestamp: chrono::Utc::now(),
+                        timestamp: chrono::Local::now(),
                         metadata: HashMap::new(),
                     };
 
@@ -277,7 +277,7 @@ where
         model: request.model,
         usage: None,
         conversation_id: request.conversation_id.expect("conversation_id should exist"),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
         metadata: HashMap::new(),
     };
 
@@ -370,7 +370,7 @@ where
                         }),
                         conversation_id: conversation_id.clone()
                             .unwrap_or_else(|| crate::server::models::generate_conversation_id()),
-                        timestamp: chrono::Utc::now(),
+                        timestamp: chrono::Local::now(),
                         metadata: HashMap::new(),
                     };
 
@@ -413,7 +413,7 @@ where
         model: request.model,
         usage: None,
         conversation_id: request.conversation_id.expect("conversation_id should exist"),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
         metadata: HashMap::new(),
     };
 

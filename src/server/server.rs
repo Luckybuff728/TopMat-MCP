@@ -61,7 +61,7 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         Default::default(),
     );
     
-    // MCP 路由 - 先应用 MCP 服务，再应用 MCP 数据存储中间件，最后应用认证中间件
+    // MCP 路由 - 执行顺序：认证 → 数据存储 → MCP 服务 (layer 从下到上执行)
     let mcp_route = Router::new()
         .nest_service("/mcp", mcp_service)
         .layer(middleware::from_fn_with_state(
@@ -70,7 +70,7 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            crate::server::middleware::mcp_auth::McpAuthMiddleware::authenticate_request,
+            crate::server::middleware::auth::AuthMiddleware::authenticate_request_skip_get,
         ));
 
     // SSE MCP 路由 - 使用 SSE 协议提供 MCP 服务，集成到现有路由中
@@ -117,7 +117,7 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         tracing::info!("SSE 传输处理结束");
     });
 
-    // SSE MCP 路由 - 集成 SSE 路由器，添加数据存储和认证中间件
+    // SSE MCP 路由 - 执行顺序：认证 → 数据存储 → SSE 服务 (layer 从下到上执行)
     let sse_mcp_route = Router::new()
         .nest_service("/sse", sse_router)
         .layer(middleware::from_fn_with_state(
@@ -126,7 +126,7 @@ pub async fn create_server(database: crate::server::database::DatabaseConnection
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            crate::server::middleware::mcp_auth::McpAuthMiddleware::authenticate_request,
+            crate::server::middleware::auth::AuthMiddleware::authenticate_request_skip_get,
         ));
 
     // 创建其他受保护的路由（只需要认证）

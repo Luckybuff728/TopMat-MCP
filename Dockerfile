@@ -38,7 +38,10 @@ COPY --from=builder /app/target/release/TopMat-LLM /app/TopMat-LLM
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     sqlite3 \
-    && rm -rf /var/lib/apt/lists/* \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
 
 
 # 暴露端口

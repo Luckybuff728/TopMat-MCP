@@ -49,7 +49,7 @@ impl ModelRouter {
                 details: Some(serde_json::json!({
                     "available_models": self.get_available_models()
                 })),
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             })?;
 
         handler(request, auth_user).await

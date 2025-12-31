@@ -292,7 +292,7 @@ async fn handle_streaming_response(
                     model,
                     usage: None,
                     conversation_id: conversation_id.clone(),
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Local::now(),
                     metadata,
                 }
             };

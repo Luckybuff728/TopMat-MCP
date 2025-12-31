@@ -1,6 +1,6 @@
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::{header, Method, StatusCode},
     middleware::Next,
     response::Response,
     Extension,
@@ -25,12 +25,39 @@ pub struct AuthUser {
 pub struct AuthMiddleware;
 
 impl AuthMiddleware {
-    /// 验证请求中的API密钥
+    /// 验证请求中的API密钥（所有请求都需要认证）
     pub async fn authenticate_request(
         State(state): State<ServerState>,
         request: Request,
         next: Next,
     ) -> Result<Response, ErrorResponse> {
+        Self::authenticate_request_impl(state, request, next, false).await
+    }
+
+    /// 验证请求中的API密钥（GET请求跳过认证，用于MCP协议初始化）
+    pub async fn authenticate_request_skip_get(
+        State(state): State<ServerState>,
+        request: Request,
+        next: Next,
+    ) -> Result<Response, ErrorResponse> {
+        Self::authenticate_request_impl(state, request, next, true).await
+    }
+
+    /// 认证实现（内部方法）
+    async fn authenticate_request_impl(
+        state: ServerState,
+        request: Request,
+        next: Next,
+        skip_get_requests: bool,
+    ) -> Result<Response, ErrorResponse> {
+        let method = request.method().clone();
+
+        // 如果启用了跳过GET请求，且当前是GET请求，则直接放行
+        if skip_get_requests && method == Method::GET {
+            debug!("GET 请求无需认证: {}", request.uri());
+            return Ok(next.run(request).await);
+        }
+
         debug!("开始认证请求: {}", request.uri());
 
         // 提取API密钥
@@ -38,7 +65,7 @@ impl AuthMiddleware {
             error: "missing_api_key".to_string(),
             message: "缺少API密钥".to_string(),
             details: None,
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Local::now(),
         })?;
 
         debug!("提取到API密钥: {}...", &api_key[..std::cmp::min(4, api_key.len())]);
@@ -53,7 +80,7 @@ impl AuthMiddleware {
                     details: Some(serde_json::json!({
                         "error": e.to_string()
                     })),
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Local::now(),
                 }
             })?;
 
@@ -64,32 +91,32 @@ impl AuthMiddleware {
                 error: "inactive_api_key".to_string(),
                 message: "API密钥未激活".to_string(),
                 details: None,
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             });
         }
 
         // 检查API密钥是否过期
         if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&auth_result.api_key_info.expires_at) {
-            if expires_at < chrono::Utc::now() {
+            if expires_at < chrono::Local::now() {
                 warn!("API密钥已过期: {}", api_key);
                 return Err(ErrorResponse {
                     error: "expired_api_key".to_string(),
                     message: "API密钥已过期".to_string(),
                     details: None,
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Local::now(),
                 });
             }
         }
 
         // 检查用户订阅是否过期
         if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&auth_result.user_info.subscription_expires_at) {
-            if expires_at < chrono::Utc::now() {
+            if expires_at < chrono::Local::now() {
                 warn!("用户订阅已过期: user_id={}", auth_result.user_info.id);
                 return Err(ErrorResponse {
                     error: "subscription_expired".to_string(),
                     message: "用户订阅已过期".to_string(),
                     details: None,
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Local::now(),
                 });
             }
         }
@@ -147,7 +174,7 @@ macro_rules! get_auth_user {
                 error: "authentication_required".to_string(),
                 message: "需要认证".to_string(),
                 details: None,
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Local::now(),
             }
         })
     };

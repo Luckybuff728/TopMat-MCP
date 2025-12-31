@@ -48,7 +48,7 @@ pub struct ChatResponse {
     /// 会话ID
     pub conversation_id: String,
     /// 响应时间戳
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: chrono::DateTime<chrono::Local>,
     /// 额外的元数据
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, serde_json::Value>,
@@ -125,7 +125,7 @@ pub struct ErrorResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
     /// 时间戳
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: chrono::DateTime<chrono::Local>,
 }
 
 // ============== 鉴权相关数据结构 ==============
@@ -235,9 +235,9 @@ pub struct Conversation {
     /// 聊天总结
     pub summary: Option<String>,
     /// 创建时间
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Local>,
     /// 更新时间
-    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Local>,
 }
 
 /// 消息信息
@@ -258,7 +258,7 @@ pub struct Message {
     /// 元数据
     pub metadata: Option<serde_json::Value>,
     /// 创建时间
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Local>,
 }
 
 /// 创建对话请求
@@ -419,7 +419,7 @@ pub struct ModelsResponse {
     /// 总数量
     pub total: i32,
     /// 时间戳
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: chrono::DateTime<chrono::Local>,
 }
 
 // ============== 使用统计相关数据结构 ==============
@@ -496,7 +496,7 @@ pub struct HealthCheckResponse {
     /// 整体状态
     pub status: ServiceStatus,
     /// 检查时间
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: chrono::DateTime<chrono::Local>,
     /// 版本号
     pub version: String,
     /// 各服务状态
@@ -547,8 +547,8 @@ pub struct McpSessionInfo {
     pub session_id: String,
     pub transport_type: String,
     pub tool_calls_count: i64,
-    pub created_at: String,
-    pub last_activity_at: String,
+    pub created_at: chrono::DateTime<chrono::Local>,
+    pub last_activity_at: chrono::DateTime<chrono::Local>,
 }
 
 /// MCP工具调用信息
@@ -560,7 +560,7 @@ pub struct McpToolCallInfo {
     pub transport_type: String,
     pub endpoint: String,
     pub execution_time_ms: Option<i32>,
-    pub created_at: String,
+    pub created_at: chrono::DateTime<chrono::Local>,
 }
 
 /// 综合使用统计
@@ -579,7 +579,7 @@ pub struct ModelHealth {
     /// 状态
     pub status: ServiceStatus,
     /// 最后检查时间
-    pub last_checked: chrono::DateTime<chrono::Utc>,
+    pub last_checked: chrono::DateTime<chrono::Local>,
     /// 响应时间（毫秒）
     pub response_time_ms: Option<u64>,
     /// 错误信息（如果有）

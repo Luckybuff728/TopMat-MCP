@@ -40,7 +40,7 @@ pub fn create_auth_response(auth_result: AuthResult) -> Response {
             "key_name": auth_result.api_key_info.key_name,
             "expires_at": auth_result.api_key_info.expires_at
         },
-        "timestamp": chrono::Utc::now()
+        "timestamp": chrono::Local::now()
     });
 
     axum::Json(success_response).into_response()
@@ -66,7 +66,7 @@ pub fn create_error_response(auth_error: AuthError) -> ErrorResponse {
         details: Some(serde_json::json!({
             "auth_error": auth_error.to_string()
         })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     }
 }
 
@@ -76,7 +76,7 @@ pub fn create_missing_api_key_response() -> ErrorResponse {
         error: "missing_api_key".to_string(),
         message: "请求中缺少API Key，请在Authorization header中提供 'Bearer <api_key>'".to_string(),
         details: None,
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     }
 }
 

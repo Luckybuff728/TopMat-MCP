@@ -63,7 +63,7 @@ pub async fn mcp_info_handler(
             "mcp_protocol": "Model Context Protocol",
             "transport": "HTTP + JSON-RPC 2.0"
         })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })
 }
 
@@ -144,7 +144,7 @@ pub async fn mcp_tools_list_handler(
             "mcp_method": "tools/list",
             "usage": "通过 MCP 协议的 JSON-RPC 2.0 调用"
         })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })
 }
 
@@ -213,7 +213,7 @@ pub async fn mcp_tool_call_handler(
             "protocol": "JSON-RPC 2.0 over HTTP",
             "content_type": "application/json"
         })),
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
     })
 }
 

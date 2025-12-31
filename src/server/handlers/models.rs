@@ -96,7 +96,7 @@ pub async fn list_models_handler(
             }
         }).collect::<Vec<_>>(),
         "total": models.len(),
-        "timestamp": chrono::Utc::now()
+        "timestamp": chrono::Local::now()
     });
 
     Json(response)

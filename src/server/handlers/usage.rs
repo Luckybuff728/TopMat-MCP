@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+use chrono::TimeZone;
 use std::collections::HashMap;
 use futures_util::future::join_all;
 use tracing::{info, error};
@@ -46,33 +47,27 @@ pub async fn get_usage_stats_handler(
           params.period, params.from_date, params.to_date);
 
     // 解析日期参数，设置默认值
-    let from_date_str = params.from_date.unwrap_or_else(|| {
-        chrono::Utc::now()
+    let from_date_local = params.from_date.and_then(|s| {
+        chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
+            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+            .ok()
+            .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+    }).unwrap_or_else(|| {
+        chrono::Local::now()
             .checked_sub_signed(chrono::Duration::days(30))
-            .unwrap_or_else(|| chrono::Utc::now())
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string()
+            .unwrap_or_else(|| chrono::Local::now())
     });
 
-    let to_date_str = params.to_date.unwrap_or_else(|| {
-        chrono::Utc::now()
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string()
-    });
+    let to_date_local = params.to_date.and_then(|s| {
+        chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
+            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+            .ok()
+            .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+    }).unwrap_or_else(|| chrono::Local::now());
 
-    // 尝试解析日期
-    let from_date = chrono::NaiveDateTime::parse_from_str(&from_date_str, "%Y-%m-%d %H:%M:%S")
-        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&from_date_str, "%Y-%m-%dT%H:%M:%SZ"))
-        .unwrap_or_else(|_| {
-            chrono::Utc::now()
-                .checked_sub_signed(chrono::Duration::days(30))
-                .unwrap_or_else(|| chrono::Utc::now())
-                .naive_utc()
-        });
-
-    let to_date = chrono::NaiveDateTime::parse_from_str(&to_date_str, "%Y-%m-%d %H:%M:%S")
-        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&to_date_str, "%Y-%m-%dT%H:%M:%SZ"))
-        .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+    // 转换为 UTC 以便查询数据库
+    let from_date_utc = from_date_local.with_timezone(&chrono::Utc);
+    let to_date_utc = to_date_local.with_timezone(&chrono::Utc);
 
     // 查询消息使用统计
     let usage_sql = "
@@ -90,8 +85,8 @@ pub async fn get_usage_stats_handler(
     ";
 
     let rows = sqlx::query(usage_sql)
-        .bind(from_date.and_utc())
-        .bind(to_date.and_utc())
+        .bind(from_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(to_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
         .fetch_all(state.database.pool())
         .await
         .map_err(|e| {
@@ -104,7 +99,7 @@ pub async fn get_usage_stats_handler(
                     details: Some(serde_json::json!({
                         "error": e.to_string()
                     })),
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Local::now(),
                 })
             )
         })?;
@@ -157,8 +152,8 @@ pub async fn get_usage_stats_handler(
     ";
 
     let avg_response_time_ms = sqlx::query(response_time_sql)
-        .bind(from_date.and_utc())
-        .bind(to_date.and_utc())
+        .bind(from_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(to_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
         .fetch_optional(state.database.pool())
         .await
         .map_err(|e| {
@@ -171,7 +166,7 @@ pub async fn get_usage_stats_handler(
                     details: Some(serde_json::json!({
                         "error": e.to_string()
                     })),
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Local::now(),
                 })
             )
         })?
@@ -191,8 +186,8 @@ pub async fn get_usage_stats_handler(
 
     let response = UsageStatsResponse {
         period,
-        from_date: from_date.and_utc().to_rfc3339(),
-        to_date: to_date.and_utc().to_rfc3339(),
+        from_date: from_date_local.to_rfc3339(),
+        to_date: to_date_local.to_rfc3339(),
         stats: detailed_stats,
     };
 
@@ -273,7 +268,7 @@ pub async fn health_check_handler() -> Json<HealthCheckResponse> {
 
     let response = HealthCheckResponse {
         status: overall_status,
-        timestamp: chrono::Utc::now(),
+        timestamp: chrono::Local::now(),
         version,
         services,
     };
