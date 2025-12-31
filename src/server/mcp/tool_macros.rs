@@ -136,18 +136,18 @@ macro_rules! register_all_mcp_tools {
             //     args_type: EmptyParams,
             //     constructor: OnnxHealthCheck
             // },
-            OnnxGetModelsInfo {
+            OnnxModelsList {
                 args_type: EmptyParams,
-                constructor: OnnxGetModelsInfo
+                constructor: OnnxModelsList
             },
-            // OnnxLoadModel {
-            //     args_type: LoadModelRequest,
-            //     constructor: OnnxLoadModel
-            // },
-            // OnnxUnloadModel {
-            //     args_type: UnloadModelRequest,
-            //     constructor: OnnxUnloadModel
-            // },
+            OnnxScanModels {
+                args_type: EmptyParams,
+                constructor: OnnxScanModels
+            },
+            OnnxUnloadModel {
+                args_type: UnloadModelRequest,
+                constructor: OnnxUnloadModel
+            },
             OnnxModelInference {
                 args_type: InferenceRequest,
                 constructor: OnnxModelInference
@@ -156,10 +156,10 @@ macro_rules! register_all_mcp_tools {
                 args_type: UuidParams,
                 constructor: OnnxGetModelConfig
             },
-            // OnnxSayHello {
-            //     args_type: EmptyParams,
-            //     constructor: OnnxSayHello
-            // },
+            OnnxSayHello {
+                args_type: EmptyParams,
+                constructor: OnnxSayHello
+            },
 
             // RAG 知识库检索工具
             SteelRagQuery {

@@ -13,10 +13,10 @@ pub use simulation::{
 };
 pub mod onnx_service;
 pub use onnx_service::{
-    OnnxHealthCheck, OnnxGetModelsInfo, OnnxLoadModel, OnnxUnloadModel,
+    OnnxModelsList, OnnxScanModels, OnnxUnloadModel,
     OnnxModelInference, OnnxGetModelConfig, OnnxSayHello,
-    LoadModelRequest, UnloadModelRequest, InferenceRequest, UuidParams,
-    EmptyParams, OnnxServiceError
+    UnloadModelRequest, InferenceRequest, UuidParams,
+    EmptyParams, ModelListResponse, SimplifiedModelInfo, OnnxServiceError
 };
 pub mod dify;
 pub use dify::{

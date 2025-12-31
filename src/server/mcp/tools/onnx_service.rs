@@ -14,7 +14,7 @@ use rig::{
 use reqwest;
 
 // ONNX Service API 基础 URL
-const API_BASE_URL: &str = "http://111.22.21.99:10002";
+const API_BASE_URL: &str = "http://111.22.21.99:10004";
 
 
 // ==================== 错误类型 ====================
@@ -88,20 +88,18 @@ pub struct UuidParams {
     pub uuid: String,
 }
 
-/// 模型信息响应
+/// 模型列表响应
 #[derive(Debug, Deserialize)]
-pub struct AllModelsInfoResponse {
-    pub dynamic_models: Vec<DynamicModelInfo>,
-    pub total_count: usize,
+pub struct ModelListResponse {
+    pub models: Vec<SimplifiedModelInfo>,
+    pub total: usize,
 }
 
-/// 动态模型信息
+/// 简化模型信息
 #[derive(Debug, Deserialize)]
-pub struct DynamicModelInfo {
+pub struct SimplifiedModelInfo {
     pub uuid: String,
-    pub config: ModelConfig,
-    pub onnx_path: String,
-    pub status: String,
+    pub model: ModelMetadata,
     pub is_loaded: bool,
 }
 
@@ -168,26 +166,85 @@ pub struct ModelConfigResponse {
 
 // ==================== 工具实现 ====================
 
-/// ONNX Service 健康检查工具
-#[derive(Deserialize, Serialize)]
-pub struct OnnxHealthCheck;
+// /// ONNX Service 健康检查工具
+// #[derive(Deserialize, Serialize)]
+// pub struct OnnxHealthCheck;
 
-impl Default for OnnxHealthCheck {
+// impl Default for OnnxHealthCheck {
+//     fn default() -> Self {
+//         Self
+//     }
+// }
+
+// impl Tool for OnnxHealthCheck {
+//     const NAME: &'static str = "onnx_health_check";
+//     type Error = OnnxServiceError;
+//     type Args = EmptyParams;
+//     type Output = String;
+
+//     async fn definition(&self, _prompt: String) -> ToolDefinition {
+//         ToolDefinition {
+//             name: "onnx_health_check".to_string(),
+//             description: "检查 ONNX Service 服务状态和模型状态".to_string(),
+//             parameters: json!({
+//                 "type": "object",
+//                 "properties": {},
+//                 "required": []
+//             }),
+//         }
+//     }
+
+//     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+//         let client = reqwest::Client::new();
+//         let health_url = format!("{}/health", API_BASE_URL);
+
+//         let response = client
+//             .get(&health_url)
+//             .send()
+//             .await
+//             .map_err(|e| OnnxServiceError::HttpError(e.to_string()))?;
+
+//         if !response.status().is_success() {
+//             let status = response.status();
+//             let error_text = response.text().await.unwrap_or_default();
+//             return Err(OnnxServiceError::ApiError {
+//                 status: status.as_u16(),
+//                 message: error_text,
+//             });
+//         }
+
+//         let health_response: HealthResponse = response
+//             .json()
+//             .await
+//             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
+
+//         Ok(format!(
+//             "🟢 ONNX Service 健康状态:\n📊 服务状态: {}\n🤖 模型状态: {}\n⏰ 检查时间: {}",
+//             health_response.status, health_response.model_status, health_response.timestamp
+//         ))
+//     }
+// }
+
+/// ONNX Service 模型列表工具
+#[derive(Deserialize, Serialize)]
+pub struct OnnxModelsList;
+
+impl Default for OnnxModelsList {
     fn default() -> Self {
         Self
     }
 }
 
-impl Tool for OnnxHealthCheck {
-    const NAME: &'static str = "onnx_health_check";
+impl Tool for OnnxModelsList {
+    const NAME: &'static str = "onnx_models_list";
     type Error = OnnxServiceError;
     type Args = EmptyParams;
     type Output = String;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
-            name: "onnx_health_check".to_string(),
-            description: "检查 ONNX Service 服务状态和模型状态".to_string(),
+            name: "onnx_models_list".to_string(),
+            description: "获取所有可用 ONNX 模型列表及状态".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {},
@@ -198,66 +255,7 @@ impl Tool for OnnxHealthCheck {
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         let client = reqwest::Client::new();
-        let health_url = format!("{}/health", API_BASE_URL);
-
-        let response = client
-            .get(&health_url)
-            .send()
-            .await
-            .map_err(|e| OnnxServiceError::HttpError(e.to_string()))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(OnnxServiceError::ApiError {
-                status: status.as_u16(),
-                message: error_text,
-            });
-        }
-
-        let health_response: HealthResponse = response
-            .json()
-            .await
-            .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
-
-        Ok(format!(
-            "🟢 ONNX Service 健康状态:\n📊 服务状态: {}\n🤖 模型状态: {}\n⏰ 检查时间: {}",
-            health_response.status, health_response.model_status, health_response.timestamp
-        ))
-    }
-}
-
-/// ONNX Service 获取模型信息工具
-#[derive(Deserialize, Serialize)]
-pub struct OnnxGetModelsInfo;
-
-impl Default for OnnxGetModelsInfo {
-    fn default() -> Self {
-        Self
-    }
-}
-
-impl Tool for OnnxGetModelsInfo {
-    const NAME: &'static str = "onnx_get_models_info";
-    type Error = OnnxServiceError;
-    type Args = EmptyParams;
-    type Output = String;
-
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: "onnx_get_models_info".to_string(),
-            description: "获取所有已加载的 ONNX 模型信息".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {},
-                "required": []
-            }),
-        }
-    }
-
-    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let client = reqwest::Client::new();
-        let models_url = format!("{}/model/info", API_BASE_URL);
+        let models_url = format!("{}/model/list", API_BASE_URL);
 
         let response = client
             .get(&models_url)
@@ -274,82 +272,70 @@ impl Tool for OnnxGetModelsInfo {
             });
         }
 
-        let models_response: AllModelsInfoResponse = response
+        let models_response: ModelListResponse = response
             .json()
             .await
             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
         let mut info_text = format!(
-            "📋 模型信息总览 (共 {} 个模型)\n\n",
-            models_response.total_count
+            "📋 模型列表总览 (共 {} 个模型)\n\n",
+            models_response.total
         );
 
-        // 动态模型信息
-        if !models_response.dynamic_models.is_empty() {
-            info_text.push_str("🚀 动态模型列表:\n");
-            for model in models_response.dynamic_models {
+        if !models_response.models.is_empty() {
+            for model in models_response.models {
+                let status_icon = if model.is_loaded { "🟢 已加载" } else { "⚪️ 未加载" };
                 info_text.push_str(&format!(
-                    "• UUID: {}\n  名称: {}\n  版本: {}\n  描述: {}\n  状态: {}\n  路径: {}\n\n",
+                    "• 名称: {}\n  UUID: {}\n  版本: {}\n  描述: {}\n  状态: {}\n\n",
+                    model.model.name,
                     model.uuid,
-                    model.config.model.name,
-                    model.config.model.version,
-                    model.config.model.description,
-                    model.status,
-                    model.onnx_path
+                    model.model.version,
+                    model.model.description,
+                    status_icon
                 ));
             }
         } else {
-            info_text.push_str("暂无动态模型\n");
+            info_text.push_str("暂无模型可用\n");
         }
 
         Ok(info_text)
     }
 }
 
-/// ONNX Service 加载模型工具
+/// ONNX Service 扫描模型工具
 #[derive(Deserialize, Serialize)]
-pub struct OnnxLoadModel;
+pub struct OnnxScanModels;
 
-impl Default for OnnxLoadModel {
+impl Default for OnnxScanModels {
     fn default() -> Self {
         Self
     }
 }
 
-impl Tool for OnnxLoadModel {
-    const NAME: &'static str = "onnx_load_model";
+impl Tool for OnnxScanModels {
+    const NAME: &'static str = "onnx_scan_models";
     type Error = OnnxServiceError;
-    type Args = LoadModelRequest;
+    type Args = EmptyParams;
     type Output = String;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
-            name: "onnx_load_model".to_string(),
-            description: "加载指定文件夹中的 ONNX 模型".to_string(),
+            name: "onnx_scan_models".to_string(),
+            description: "立即扫描模型目录以发现新模型".to_string(),
             parameters: json!({
                 "type": "object",
-                "properties": {
-                    "folder_name": {
-                        "type": "string",
-                        "description": "模型文件夹名称"
-                    }
-                },
-                "required": ["folder_name"]
+                "properties": {},
+                "required": []
             }),
         }
     }
 
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         let client = reqwest::Client::new();
-        let load_url = format!("{}/model/load", API_BASE_URL);
-
-        let load_payload = json!({
-            "folder_name": args.folder_name
-        });
+        let scan_url = format!("{}/model/scan", API_BASE_URL);
 
         let response = client
-            .post(&load_url)
-            .json(&load_payload)
+            .post(&scan_url)
             .send()
             .await
             .map_err(|e| OnnxServiceError::HttpError(e.to_string()))?;
@@ -363,15 +349,14 @@ impl Tool for OnnxLoadModel {
             });
         }
 
-        let load_response: serde_json::Value = response
+        let scan_result: serde_json::Value = response
             .json()
             .await
             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
         Ok(format!(
-            "✅ 模型加载成功！\n📁 文件夹: {}\n📝 响应: {}",
-            args.folder_name,
-            serde_json::to_string_pretty(&load_response).unwrap_or_default()
+            "✅ 模型目录扫描完成！\n 响应: {}",
+            serde_json::to_string_pretty(&scan_result).unwrap_or_default()
         ))
     }
 }
@@ -501,8 +486,46 @@ impl Tool for OnnxModelInference {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let client = reqwest::Client::new();
-        let inference_url = format!("{}/models/{}/inference", API_BASE_URL, args.uuid);
+        
+        // 1. 首先获取模型配置以进行输入验证
+        let config_url = format!("{}/models/{}/info", API_BASE_URL, args.uuid);
+        let config_resp = client
+            .get(&config_url)
+            .send()
+            .await
+            .map_err(|e| OnnxServiceError::HttpError(format!("获取验证配置失败: {}", e)))?;
 
+        if !config_resp.status().is_success() {
+            let status = config_resp.status();
+            let error_text = config_resp.text().await.unwrap_or_default();
+            return Err(OnnxServiceError::ApiError {
+                status: status.as_u16(),
+                message: format!("获取模型配置失败，无法验证输入: {}", error_text),
+            });
+        }
+
+        let config: ModelConfigResponse = config_resp
+            .json()
+            .await
+            .map_err(|e| OnnxServiceError::JsonError(format!("解析验证配置失败: {}", e)))?;
+
+        // 2. 验证必填输入
+        let mut missing_inputs = Vec::new();
+        for input_spec in &config.config.inputs {
+            if !args.inputs.contains_key(&input_spec.feature) {
+                missing_inputs.push(format!("{} ({})", input_spec.feature, input_spec.description));
+            }
+        }
+
+        if !missing_inputs.is_empty() {
+            return Err(OnnxServiceError::InvalidRequest(format!(
+                "缺少必需的输入参数:\n• {}\n\n请参考模型配置进行调用。",
+                missing_inputs.join("\n• ")
+            )));
+        }
+
+        // 3. 执行推理
+        let inference_url = format!("{}/models/{}/inference", API_BASE_URL, args.uuid);
         let inference_payload = json!({
             "inputs": args.inputs
         });
@@ -668,6 +691,6 @@ impl Tool for OnnxSayHello {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        Ok("🚀 欢迎使用 ONNX Service MCP 工具！\n\n可用功能:\n\n🔍 服务管理:\n• onnx_health_check - 检查服务状态\n• onnx_get_models_info - 获取所有模型信息\n\n🤖 模型管理:\n• onnx_load_model - 加载模型\n• onnx_unload_model - 卸载模型\n• onnx_get_model_config - 获取模型配置\n\n🎯 模型推理:\n• onnx_model_inference - 执行模型推理\n\n💡 使用提示:\n1. 首先使用 onnx_health_check 检查服务状态\n2. 使用 onnx_get_models_info 查看已加载的模型\n3. 使用 onnx_load_model 加载新模型\n4. 使用 onnx_model_inference 进行推理计算".to_string())
+        Ok("🚀 欢迎使用 ONNX Service MCP 工具！\n\n可用功能:\n\n🔍 服务管理:\n• onnx_models_list - 获取所有可用模型列表及状态\n• onnx_scan_models - 立即扫描模型目录以发现新模型\n\n🤖 模型管理:\n• onnx_unload_model - 强制卸载指定模型\n• onnx_get_model_config - 获取指定模型的详细输入输出配置 (推理前必须调用)\n\n🎯 模型推理:\n• onnx_model_inference - 对已加载模型执行推理计算\n\n💡 推荐工作流:\n1. 使用 onnx_models_list 查看模型是否已加载\n2. 如需更新模型库，使用 onnx_scan_models 触发扫描\n3. 在执行推理前，**必须先通过 onnx_get_model_config 获取该模型所需的 feature 列表和范围**\n4. 根据配置信息准备输入数据，最后调用 onnx_model_inference 进行推理".to_string())
     }
 }
