@@ -96,28 +96,32 @@ impl AuthMiddleware {
         }
 
         // 检查API密钥是否过期
-        if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&auth_result.api_key_info.expires_at) {
-            if expires_at < chrono::Local::now() {
-                warn!("API密钥已过期: {}", api_key);
-                return Err(ErrorResponse {
-                    error: "expired_api_key".to_string(),
-                    message: "API密钥已过期".to_string(),
-                    details: None,
-                    timestamp: chrono::Local::now(),
-                });
+        if let Some(expires_str) = &auth_result.api_key_info.expires_at {
+            if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_str) {
+                if expires_at < chrono::Local::now() {
+                    warn!("API密钥已过期: {}", api_key);
+                    return Err(ErrorResponse {
+                        error: "expired_api_key".to_string(),
+                        message: "API密钥已过期".to_string(),
+                        details: None,
+                        timestamp: chrono::Local::now(),
+                    });
+                }
             }
         }
 
         // 检查用户订阅是否过期
-        if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&auth_result.user_info.subscription_expires_at) {
-            if expires_at < chrono::Local::now() {
-                warn!("用户订阅已过期: user_id={}", auth_result.user_info.id);
-                return Err(ErrorResponse {
-                    error: "subscription_expired".to_string(),
-                    message: "用户订阅已过期".to_string(),
-                    details: None,
-                    timestamp: chrono::Local::now(),
-                });
+        if let Some(sub_expires_str) = &auth_result.user_info.subscription_expires_at {
+            if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(sub_expires_str) {
+                if expires_at < chrono::Local::now() {
+                    warn!("用户订阅已过期: user_id={}", auth_result.user_info.id);
+                    return Err(ErrorResponse {
+                        error: "subscription_expired".to_string(),
+                        message: "用户订阅已过期".to_string(),
+                        details: None,
+                        timestamp: chrono::Local::now(),
+                    });
+                }
             }
         }
 

@@ -14,7 +14,7 @@ use rig::{
 use reqwest;
 
 // ONNX Service API 基础 URL
-const API_BASE_URL: &str = "http://111.22.21.99:10004";
+const API_BASE_URL: &str = "http://111.22.21.99:10002";
 
 
 // ==================== 错误类型 ====================
@@ -278,20 +278,22 @@ impl Tool for OnnxModelsList {
             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
         let mut info_text = format!(
-            "📋 模型列表总览 (共 {} 个模型)\n\n",
+            "模型列表 (共 {} 个)
+
+",
             models_response.total
         );
 
         if !models_response.models.is_empty() {
             for model in models_response.models {
-                let status_icon = if model.is_loaded { "🟢 已加载" } else { "⚪️ 未加载" };
+                let status = if model.is_loaded { "已加载" } else { "未加载" };
                 info_text.push_str(&format!(
-                    "• 名称: {}\n  UUID: {}\n  版本: {}\n  描述: {}\n  状态: {}\n\n",
+                    "• {}: {} [{}] - {}\n  UUID: {}\n",
                     model.model.name,
-                    model.uuid,
                     model.model.version,
+                    status,
                     model.model.description,
-                    status_icon
+                    model.uuid
                 ));
             }
         } else {
@@ -355,7 +357,7 @@ impl Tool for OnnxScanModels {
             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
         Ok(format!(
-            "✅ 模型目录扫描完成！\n 响应: {}",
+            "扫描完成: {}",
             serde_json::to_string_pretty(&scan_result).unwrap_or_default()
         ))
     }
@@ -439,9 +441,8 @@ impl Tool for OnnxUnloadModel {
 
         let identifier = args.uuid.unwrap_or_else(|| args.model_name.unwrap_or_default());
         Ok(format!(
-            "✅ 模型卸载成功！\n🔍 标识符: {}\n📝 响应: {}",
-            identifier,
-            serde_json::to_string_pretty(&unload_response).unwrap_or_default()
+            "模型卸载成功: {}",
+            identifier
         ))
     }
 }
@@ -552,7 +553,7 @@ impl Tool for OnnxModelInference {
             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
         let mut result_text = format!(
-            "🎯 推理完成！\n🆔 模型UUID: {}\n⏱️ 推理时间: {:.2}ms\n📋 请求ID: {}\n\n🔢 输出结果:\n",
+            "推理完成\nUUID: {}\n耗时: {:.2}ms\n请求ID: {}\n输出:\n",
             inference_response.model_uuid,
             inference_response.inference_time_ms,
             inference_response.request_id
@@ -560,12 +561,11 @@ impl Tool for OnnxModelInference {
 
         for (key, output_value) in inference_response.outputs {
             result_text.push_str(&format!(
-                "• {}: {:.6}\n  📝 描述: {}\n  📊 范围: [{:.2}, {:.2}]\n",
+                "• {}: {:.6} ({})
+",
                 key,
                 output_value.value,
-                output_value.description,
-                output_value.min,
-                output_value.max
+                output_value.description
             ));
         }
 
@@ -631,7 +631,7 @@ impl Tool for OnnxGetModelConfig {
             .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
         let mut config_text = format!(
-            "⚙️ 模型配置详情\n\n🆔 UUID: {}\n📊 状态: {}\n✅ 已加载: {}\n\n📋 基本信息:\n• 名称: {}\n• 版本: {}\n• 描述: {}\n\n",
+            "模型配置\nUUID: {}\n状态: {} (已加载: {})\n名称: {}\n版本: {}\n描述: {}\n\n",
             config_response.uuid,
             config_response.status,
             config_response.is_loaded,
@@ -641,7 +641,7 @@ impl Tool for OnnxGetModelConfig {
         );
 
         // 输入规格
-        config_text.push_str("📥 输入规格:\n");
+        config_text.push_str("输入:\n");
         for input in config_response.config.inputs {
             config_text.push_str(&format!(
                 "• {}: [{:.2}, {:.2}] - {}\n",
@@ -650,7 +650,7 @@ impl Tool for OnnxGetModelConfig {
         }
 
         // 输出规格
-        config_text.push_str("\n📤 输出规格:\n");
+        config_text.push_str("\n输出:\n");
         for output in config_response.config.outputs {
             config_text.push_str(&format!(
                 "• {}: [{:.2}, {:.2}] - {}\n",
@@ -691,6 +691,6 @@ impl Tool for OnnxSayHello {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        Ok("🚀 欢迎使用 ONNX Service MCP 工具！\n\n可用功能:\n\n🔍 服务管理:\n• onnx_models_list - 获取所有可用模型列表及状态\n• onnx_scan_models - 立即扫描模型目录以发现新模型\n\n🤖 模型管理:\n• onnx_unload_model - 强制卸载指定模型\n• onnx_get_model_config - 获取指定模型的详细输入输出配置 (推理前必须调用)\n\n🎯 模型推理:\n• onnx_model_inference - 对已加载模型执行推理计算\n\n💡 推荐工作流:\n1. 使用 onnx_models_list 查看模型是否已加载\n2. 如需更新模型库，使用 onnx_scan_models 触发扫描\n3. 在执行推理前，**必须先通过 onnx_get_model_config 获取该模型所需的 feature 列表和范围**\n4. 根据配置信息准备输入数据，最后调用 onnx_model_inference 进行推理".to_string())
+        Ok("ONNX Service MCP 工具\n\n可用功能:\n• onnx_models_list - 获取模型列表\n• onnx_scan_models - 扫描模型目录\n• onnx_unload_model - 卸载模型\n• onnx_get_model_config - 获取模型配置(推理前必调用)\n• onnx_model_inference - 执行推理\n\n工作流:\n1. 调用 onnx_models_list 查看模型\n2. 调用 onnx_get_model_config 获取输入要求\n3. 调用 onnx_model_inference 执行推理".to_string())
     }
 }

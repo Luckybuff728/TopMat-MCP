@@ -339,12 +339,10 @@ impl Tool for SubmitSpinodalDecompositionTask {
             .map_err(|e| PhaseFieldError::JsonError(format!("Failed to parse response: {}", e)))?;
 
         Ok(format!(
-            "✅ 调幅分解模拟任务提交成功！\n📋 任务ID: {}\n📝 任务名称: {}\n⚙️ 执行工具: mesospire\n🔧 进程ID: {}\n💼 工作目录: {}\n📋 命令行: {}",
+            "调幅分解模拟任务已提交\nID: {}\n名称: {}\n进程ID: {}",
             task_response.data.task_id,
             task_response.data.task_name,
-            task_response.data.pid,
-            task_response.data.working_directory,
-            task_response.data.command_line
+            task_response.data.pid
         ))
     }
 }
@@ -492,12 +490,10 @@ impl Tool for SubmitPvdSimulationTask {
             .map_err(|e| PhaseFieldError::JsonError(format!("Failed to parse response: {}", e)))?;
 
         Ok(format!(
-            "✅ PVD模拟任务提交成功！\n📋 任务ID: {}\n📝 任务名称: {}\n⚙️ 执行工具: mesospire\n🔧 进程ID: {}\n💼 工作目录: {}\n📋 命令行: {}",
+            "PVD模拟任务已提交\nID: {}\n名称: {}\n进程ID: {}",
             task_response.data.task_id,
             task_response.data.task_name,
-            task_response.data.pid,
-            task_response.data.working_directory,
-            task_response.data.command_line
+            task_response.data.pid
         ))
     }
 }
@@ -563,26 +559,18 @@ impl Tool for GetTaskList {
             .await
             .map_err(|e| PhaseFieldError::JsonError(format!("Failed to parse response: {}", e)))?;
 
-        let mut result = format!("📋 任务列表 (共 {} 个任务)\n\n", list_response.data.total);
+        let mut result = format!("任务列表 (共{}个)\n\n", list_response.data.total);
 
         if list_response.data.tasks.is_empty() {
-            result.push_str("🤷‍♂️ 暂无任务");
+            result.push_str("暂无任务");
         } else {
             for (idx, task) in list_response.data.tasks.iter().enumerate() {
-                let status_emoji = match task.status.as_str() {
-                    "running" => "⚙️",
-                    "completed" => "✅",
-                    "failed" => "❌",
-                    "pending" => "⏳",
-                    _ => "❓",
-                };
                 result.push_str(&format!(
-                    "{}. {} {} | {} | {} | {}\n",
+                    "{}. [{}] {} | {} | {}\n",
                     idx + 1,
-                    status_emoji,
+                    task.status,
                     task.task_name,
                     task.task_id,
-                    task.status,
                     task.start_time
                 ));
             }
@@ -654,27 +642,14 @@ impl Tool for GetTaskStatus {
             .await
             .map_err(|e| PhaseFieldError::JsonError(format!("Failed to parse response: {}", e)))?;
 
-        let status_emoji = match status_response.data.status.as_deref().unwrap_or("unknown") {
-            "running" => "⚙️",
-            "completed" => "✅",
-            "failed" => "❌",
-            "pending" => "⏳",
-            _ => "❓",
-        };
-
         Ok(format!(
-            "{} 任务状态详情\n\n📋 任务ID: {}\n📝 任务名称: {}\n🔧 执行工具: {}\n📊 状态: {} {}\n⚙️ 进程ID: {}\n🕐 开始时间: {}\n🕒 检查时间: {}\n⏱️ 运行时长: {} 秒\n💼 工作目录: {}",
-            status_emoji,
+            "任务状态\nID: {}\n名称: {}\n状态: {}\n进程ID: {}\n开始: {}\n运行时长: {}秒",
             status_response.data.task_id.as_deref().unwrap_or(&args.task_id),
             status_response.data.task_name.as_deref().unwrap_or("未知"),
-            status_response.data.exe_tool.as_deref().unwrap_or("未知"),
-            status_emoji,
             status_response.data.status.as_deref().unwrap_or("未知"),
             status_response.data.pid.map(|p| p.to_string()).unwrap_or_else(|| "未知".to_string()),
             status_response.data.start_time.as_deref().unwrap_or("未知"),
-            status_response.data.end_checked_time.as_deref().unwrap_or("未知"),
-            status_response.data.duration_seconds.map(|d| d.to_string()).unwrap_or_else(|| "未知".to_string()),
-            status_response.data.working_directory.as_deref().unwrap_or("未知")
+            status_response.data.duration_seconds.map(|d| d.to_string()).unwrap_or_else(|| "未知".to_string())
         ))
     }
 }
@@ -742,10 +717,9 @@ impl Tool for StopTask {
             .map_err(|e| PhaseFieldError::JsonError(format!("Failed to parse response: {}", e)))?;
 
         Ok(format!(
-            "✅ 任务停止成功！\n📋 任务ID: {}\n📝 任务名称: {}\n📄 消息: {}",
+            "任务已停止\nID: {}\n名称: {}",
             stop_response.data.task_id,
-            stop_response.data.task_name,
-            stop_response.data.message
+            stop_response.data.task_name
         ))
     }
 }
@@ -807,10 +781,10 @@ impl Tool for ProbeTaskFiles {
             .await
             .map_err(|e| PhaseFieldError::JsonError(format!("Failed to parse response: {}", e)))?;
 
-        let mut result = format!("📁 任务 {} 的结果文件列表\n\n", args.task_id);
+        let mut result = format!("任务 {} 的文件列表\n\n", args.task_id);
 
         if file_list_response.data.is_empty() {
-            result.push_str("🤷‍♂️ 暂无文件");
+            result.push_str("暂无文件");
         } else {
             for (idx, file) in file_list_response.data.iter().enumerate() {
                 result.push_str(&format!("{}. {}\n", idx + 1, file));
@@ -889,7 +863,7 @@ impl Tool for RetrieveFile {
             .map_err(|e| PhaseFieldError::HttpError(e.to_string()))?;
 
         Ok(format!(
-            "📄 文件内容\n\n📁 文件路径: {}\n\n--- 文件内容开始 ---\n{}\n--- 文件内容结束 ---",
+            "文件内容\n路径: {}\n\n{}",
             args.file_path,
             file_content
         ))

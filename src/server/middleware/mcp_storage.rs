@@ -207,12 +207,12 @@ impl McpStorage {
         Ok(())
     }
 
-    /// 记录工具调用请求
+    /// 记录工具调用请求，返回插入的记录 ID
     async fn record_tool_call_request(
         db: &DatabaseConnection,
         context: &McpSessionContext,
         mcp_request: &Value,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(params) = mcp_request.get("params") {
             if let (Some(tool_name), Some(arguments)) = (
                 params.get("name").and_then(|n| n.as_str()),
@@ -220,7 +220,7 @@ impl McpStorage {
             ) {
                 let arguments_json = serde_json::to_string(arguments).ok();
 
-                sqlx::query(
+                let result = sqlx::query(
                     r#"
                     INSERT INTO mcp_tool_calls
                     (user_id, session_id, tool_name, request_arguments, status, transport_type, endpoint)
@@ -236,10 +236,12 @@ impl McpStorage {
                 .execute(db.pool())
                 .await?;
 
-                info!("McpStorage: 已记录工具调用请求: {} (session: {})", tool_name, context.session_id);
+                let row_id = result.last_insert_rowid();
+                info!("McpStorage: 已记录工具调用请求: {} (session: {}, id: {})", tool_name, context.session_id, row_id);
+                return Ok(Some(row_id));
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     /// 处理工具调用响应并记录结果
@@ -280,9 +282,31 @@ impl McpStorage {
             }
         };
 
+        // 尝试提取 SSE 格式中的 JSON 数据
+        // SSE 格式: "data: {...json...}\n\nid: xxx"
+        let json_bytes: bytes::Bytes = {
+            let content = String::from_utf8_lossy(&bytes);
+            if content.starts_with("data: ") {
+                // 提取 "data: " 后面的 JSON 内容
+                if let Some(json_start) = content.find("data: ") {
+                    let json_part = &content[json_start + 6..];
+                    // 找到第一个换行符作为 JSON 结束
+                    if let Some(json_end) = json_part.find('\n') {
+                        bytes::Bytes::from(json_part[..json_end].trim().to_string())
+                    } else {
+                        bytes::Bytes::from(json_part.trim().to_string())
+                    }
+                } else {
+                    bytes.clone()
+                }
+            } else {
+                bytes.clone()
+            }
+        };
+
         // 解析MCP响应
-        if let Ok(mcp_response) = serde_json::from_slice::<Value>(&bytes) {
-            debug!("McpStorage: 解析到MCP响应: {}", serde_json::to_string_pretty(&mcp_response).unwrap_or_default());
+        match serde_json::from_slice::<Value>(&json_bytes) {
+            Ok(mcp_response) => {
 
             // 检查是否是工具调用响应
             if let (Some(id), Some(result)) = (
@@ -297,7 +321,7 @@ impl McpStorage {
                     let result_json = serde_json::to_string(result).ok();
 
                     // 记录成功的工具调用结果
-                    Self::record_tool_call_result(
+                    match Self::record_tool_call_result(
                         db,
                         context,
                         tool_name,
@@ -305,9 +329,10 @@ impl McpStorage {
                         None, // 执行时间需要在实际调用处测量
                         "success",
                         None,
-                    ).await;
-
-                    info!("McpStorage: 已记录工具调用成功结果: {} (session: {})", tool_name, context.session_id);
+                    ).await {
+                        Ok(_) => {},
+                        Err(e) => error!("McpStorage: 更新工具调用结果失败: {} - {}", tool_name, e),
+                    }
                 }
             }
 
@@ -322,7 +347,7 @@ impl McpStorage {
                         .and_then(|m| m.as_str())
                         .unwrap_or("未知错误");
 
-                    Self::record_tool_call_result(
+                    match Self::record_tool_call_result(
                         db,
                         context,
                         tool_name,
@@ -330,10 +355,15 @@ impl McpStorage {
                         None,
                         "error",
                         Some(error_message),
-                    ).await;
-
-                    warn!("McpStorage: 记录到工具调用错误: {} - {}", tool_name, error_message);
+                    ).await {
+                        Ok(_) => warn!("McpStorage: 工具调用失败: {} - {}", tool_name, error_message),
+                        Err(e) => error!("McpStorage: 更新工具调用错误记录失败: {} - {}", tool_name, e),
+                    }
                 }
+            }
+            },
+            Err(_) => {
+                // SSE响应解析失败，静默处理
             }
         }
 
@@ -341,7 +371,7 @@ impl McpStorage {
         Ok(Response::from_parts(parts, Body::from(bytes)))
     }
 
-    /// 记录工具调用结果
+    /// 记录工具调用结果（通过 ID 更新指定记录）
     async fn record_tool_call_result(
         db: &DatabaseConnection,
         context: &McpSessionContext,
@@ -350,16 +380,20 @@ impl McpStorage {
         execution_time_ms: Option<i32>,
         status: &str,
         error_message: Option<&str>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        sqlx::query(
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        // 更新最近一条 pending 记录（通过 session_id + tool_name + status 匹配，按 id 降序取最新）
+        let query_result = sqlx::query(
             r#"
             UPDATE mcp_tool_calls
             SET response_result = ?1,
                 execution_time_ms = ?2,
                 status = ?3,
-                error_message = ?4,
-                created_at = datetime('now')
-            WHERE session_id = ?5 AND tool_name = ?6 AND status = 'pending'
+                error_message = ?4
+            WHERE id = (
+                SELECT id FROM mcp_tool_calls 
+                WHERE session_id = ?5 AND tool_name = ?6 AND status = 'pending'
+                ORDER BY id DESC LIMIT 1
+            )
             "#
         )
         .bind(result)
@@ -371,7 +405,7 @@ impl McpStorage {
         .execute(db.pool())
         .await?;
 
-        Ok(())
+        Ok(query_result.rows_affected())
     }
 
     /// 异步记录工具调用（用于MCP服务器内部调用）

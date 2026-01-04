@@ -126,8 +126,7 @@ impl AuthClient {
             username: row.try_get("username").unwrap_or_default(),
             email: row.try_get("email").unwrap_or_default(),
             subscription_level: row.try_get("subscription_level").unwrap_or_default(),
-            subscription_expires_at: row.try_get("subscription_expires_at")
-                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string()),
+            subscription_expires_at: row.try_get("subscription_expires_at").ok(),
         };
 
         let api_key_info = ApiKeyInfo {
@@ -135,8 +134,7 @@ impl AuthClient {
             created_at: row.try_get("created_at")
                 .unwrap_or_else(|_| chrono::Utc::now())
                 .to_rfc3339(),
-            expires_at: row.try_get("expires_at")
-                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string()),
+            expires_at: row.try_get("expires_at").ok(),
             id: row.try_get::<i64, _>("id").unwrap_or(0) as u32,
             is_active: row.try_get("is_active").unwrap_or(false),
             key_name: row.try_get("key_name").unwrap_or_default(),
@@ -164,13 +162,13 @@ impl AuthClient {
                 username: "test_user".to_string(),
                 email: "test@example.com".to_string(),
                 subscription_level: "pro".to_string(),
-                subscription_expires_at: "2025-12-31T23:59:59Z".to_string(),
+                subscription_expires_at: Some("2025-12-31T23:59:59Z".to_string()),
             };
 
             let mock_api_key_info = ApiKeyInfo {
                 api_key: "tk_mock123456789".to_string(),
                 created_at: "2024-01-01T00:00:00Z".to_string(),
-                expires_at: "2025-12-31T23:59:59Z".to_string(),
+                expires_at: Some("2025-12-31T23:59:59Z".to_string()),
                 id: 1,
                 is_active: true,
                 key_name: "Test Mock API Key".to_string(),
@@ -220,22 +218,26 @@ impl AuthClient {
         }
 
         // 检查API Key是否过期
-        if let Some(expires_at) = self.parse_datetime(&api_key_info.expires_at) {
-            if expires_at < chrono::Utc::now() {
-                warn!("API Key已过期: {} (过期时间: {})",
-                      api_key_info.key_name, api_key_info.expires_at);
-                return Err(AuthError::ExpiredApiKey);
+        if let Some(expires_at_str) = &api_key_info.expires_at {
+            if let Some(expires_at) = self.parse_datetime(expires_at_str) {
+                if expires_at < chrono::Utc::now() {
+                    warn!("API Key已过期: {} (过期时间: {})",
+                          api_key_info.key_name, expires_at_str);
+                    return Err(AuthError::ExpiredApiKey);
+                }
             }
         }
 
         // 检查用户订阅是否过期
-        if let Some(subscription_expires_at) = self.parse_datetime(&api_key_info.user.subscription_expires_at) {
-            if subscription_expires_at < chrono::Utc::now() {
-                warn!("用户订阅已过期: {} (用户: {}, 过期时间: {})",
-                      api_key_info.key_name,
-                      api_key_info.user.username,
-                      api_key_info.user.subscription_expires_at);
-                return Err(AuthError::SubscriptionExpired);
+        if let Some(sub_expires_at_str) = &api_key_info.user.subscription_expires_at {
+            if let Some(subscription_expires_at) = self.parse_datetime(sub_expires_at_str) {
+                if subscription_expires_at < chrono::Utc::now() {
+                    warn!("用户订阅已过期: {} (用户: {}, 过期时间: {})",
+                          api_key_info.key_name,
+                          api_key_info.user.username,
+                          sub_expires_at_str);
+                    return Err(AuthError::SubscriptionExpired);
+                }
             }
         }
 

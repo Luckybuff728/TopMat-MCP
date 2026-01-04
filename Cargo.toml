@@ -43,3 +43,4 @@ tokio-util = "0.7"
 base64 = "0.22"
 utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
+indexmap = "2.2"

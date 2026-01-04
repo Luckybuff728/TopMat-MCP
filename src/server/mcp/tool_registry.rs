@@ -4,7 +4,7 @@
 
 use rmcp::ErrorData as McpError;
 use serde_json::{json, Value as JsonValue};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::sync::Mutex;
 use tokio::sync::OnceCell;
 use tracing::info;
@@ -26,8 +26,8 @@ pub struct ToolEntry {
 
 /// 工具注册表
 pub struct ToolRegistry {
-    /// 工具集合
-    tools: HashMap<String, ToolEntry>,
+    /// 工具集合（使用 IndexMap 保持注册顺序）
+    tools: IndexMap<String, ToolEntry>,
 }
 
 // 静态单例实例
@@ -38,7 +38,7 @@ impl ToolRegistry {
     pub async fn get_instance() -> &'static Mutex<ToolRegistry> {
         TOOL_REGISTRY.get_or_init(|| async {
             let mut registry = ToolRegistry {
-                tools: HashMap::new(),
+                tools: IndexMap::new(),
             };
 
             // 只在第一次创建时注册工具

@@ -142,7 +142,7 @@ pub struct UserInfo {
     /// 订阅级别
     pub subscription_level: String,
     /// 订阅过期时间
-    pub subscription_expires_at: String,
+    pub subscription_expires_at: Option<String>,
 }
 
 /// API Key信息响应结构
@@ -153,7 +153,7 @@ pub struct ApiKeyInfo {
     /// 创建时间
     pub created_at: String,
     /// 过期时间
-    pub expires_at: String,
+    pub expires_at: Option<String>,
     /// ID
     pub id: u32,
     /// 是否激活
@@ -556,7 +556,10 @@ pub struct McpSessionInfo {
 pub struct McpToolCallInfo {
     pub session_id: Option<String>,
     pub tool_name: String,
+    pub request_arguments: Option<String>,
+    pub response_result: Option<String>,
     pub status: String,
+    pub error_message: Option<String>,
     pub transport_type: String,
     pub endpoint: String,
     pub execution_time_ms: Option<i32>,

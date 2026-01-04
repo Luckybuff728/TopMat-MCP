@@ -93,6 +93,22 @@ impl ServerHandler for TopMatMcpServer {
     ) -> Result<CallToolResult, McpError> {
         info!("调用工具: {}（单例模式）", name);
 
+        // 打印请求体（工具参数）
+        if let Some(ref args) = arguments {
+            info!("📥 请求体 (arguments): {}", serde_json::to_string_pretty(&serde_json::Value::Object(args.clone())).unwrap_or_default());
+        } else {
+            info!("📥 请求体 (arguments): {{}}");
+        }
+
+        // 打印请求头
+        if let Some(http_parts) = context.extensions.get::<axum::http::request::Parts>() {
+            let headers_str: String = http_parts.headers.iter()
+                .map(|(k, v)| format!("  {}: {}", k, v.to_str().unwrap_or("<binary>")))
+                .collect::<Vec<_>>()
+                .join("\n");
+            info!("📋 请求头:\n{}", headers_str);
+        }
+
         // 记录开始时间用于执行时间统计
         let start_time = std::time::Instant::now();
 

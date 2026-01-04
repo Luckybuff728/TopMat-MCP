@@ -349,7 +349,7 @@ pub async fn get_mcp_tool_calls_handler(
 
     // 获取工具调用记录
     let calls_query = format!(
-        "SELECT session_id, tool_name, status, transport_type, endpoint, execution_time_ms, created_at FROM mcp_tool_calls {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        "SELECT session_id, tool_name, request_arguments, response_result, status, error_message, transport_type, endpoint, execution_time_ms, created_at FROM mcp_tool_calls {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
         where_clause
     );
     let tool_calls = sqlx::query(&calls_query)
@@ -370,7 +370,10 @@ pub async fn get_mcp_tool_calls_handler(
         call_list.push(McpToolCallInfo {
             session_id: row.try_get("session_id").ok(),
             tool_name: row.try_get("tool_name").unwrap_or_default(),
+            request_arguments: row.try_get("request_arguments").ok(),
+            response_result: row.try_get("response_result").ok(),
             status: row.try_get("status").unwrap_or_default(),
+            error_message: row.try_get("error_message").ok(),
             transport_type: row.try_get("transport_type").unwrap_or_default(),
             endpoint: row.try_get("endpoint").unwrap_or_default(),
             execution_time_ms: row.try_get("execution_time_ms").ok(),

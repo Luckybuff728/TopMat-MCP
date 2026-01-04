@@ -208,6 +208,16 @@ fn default_database() -> String { "default".to_string() }
 fn default_page() -> i32 { 1 }
 fn default_items_per_page() -> i32 { 50 }
 
+/// 验证组分之和是否等于1（允许微小误差），返回错误信息
+fn validate_composition_sum(composition: &HashMap<String, f64>) -> Option<String> {
+    let sum: f64 = composition.values().sum();
+    const TOLERANCE: f64 = 1e-6;
+    if (sum - 1.0).abs() > TOLERANCE {
+        return Some(format!("组分之和必须为1，当前总和为 {:.6}，请调整组分值后重试", sum));
+    }
+    None
+}
+
 // Calpha Mesh API 客户端
 #[derive(Clone)]
 pub struct CalphaMeshClient {
@@ -449,12 +459,17 @@ impl Tool for SubmitPointTask {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // 验证组分之和
+        if let Some(error_msg) = validate_composition_sum(&args.composition) {
+            return Ok(error_msg);
+        }
+
         // 使用参数中的 API key
         let client = CalphaMeshClient::new(args.api_key.clone());
         let task_response = client.submit_point_task(args).await?;
 
         Ok(format!(
-            "✅ Point 计算任务提交成功！\n📋 任务ID: {}\n📊 状态: {}\n🔬 类型: point",
+            "Point计算任务已提交\nID: {}\n状态: {}",
             task_response.id, task_response.status
         ))
     }
@@ -526,12 +541,21 @@ impl Tool for SubmitLineTask {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // 验证起始组分之和
+        if let Some(error_msg) = validate_composition_sum(&args.start_composition) {
+            return Ok(format!("起始组分错误: {}", error_msg));
+        }
+        // 验证结束组分之和
+        if let Some(error_msg) = validate_composition_sum(&args.end_composition) {
+            return Ok(format!("结束组分错误: {}", error_msg));
+        }
+
         // 使用参数中的 API key
         let client = CalphaMeshClient::new(args.api_key.clone());
         let task_response = client.submit_line_task(args).await?;
 
         Ok(format!(
-            "✅ Line 计算任务提交成功！\n📋 任务ID: {}\n📊 状态: {}\n🔬 类型: line",
+            "Line计算任务已提交\nID: {}\n状态: {}",
             task_response.id, task_response.status
         ))
     }
@@ -590,12 +614,17 @@ impl Tool for SubmitScheilTask {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // 验证组分之和
+        if let Some(error_msg) = validate_composition_sum(&args.composition) {
+            return Ok(error_msg);
+        }
+
         // 使用参数中的 API key
         let client = CalphaMeshClient::new(args.api_key.clone());
         let task_response = client.submit_scheil_task(args).await?;
 
         Ok(format!(
-            "✅ Scheil 计算任务提交成功！\n📋 任务ID: {}\n📊 状态: {}\n🔬 类型: scheil",
+            "Scheil计算任务已提交\nID: {}\n状态: {}",
             task_response.id, task_response.status
         ))
     }
@@ -640,27 +669,18 @@ impl Tool for GetTaskStatus {
         let client = CalphaMeshClient::new(args.api_key.clone());
         let task = client.get_task_status(args.task_id).await?;
 
-        let status_emoji = match task.status.as_str() {
-            "pending" => "⏳",
-            "queued" => "📋",
-            "running" => "⚙️",
-            "completed" => "✅",
-            "failed" => "❌",
-            _ => "❓"
-        };
-
         let mut result = format!(
-            "{} 任务状态查询结果\n\n📋 任务ID: {}\n📝 标题: {}\n🔬 类型: {}\n📊 状态: {} {}\n👤 用户ID: {}\n🕐 创建时间: {}\n🕒 更新时间: {}",
-            status_emoji, task.id, task.title, task.task_type, status_emoji, task.status, task.user_id, task.created_at, task.updated_at
+            "任务状态\nID: {}\n标题: {}\n类型: {}\n状态: {}\n用户ID: {}\n创建: {}\n更新: {}",
+            task.id, task.title, task.task_type, task.status, task.user_id, task.created_at, task.updated_at
         );
 
         if let Some(result_data) = &task.result {
-            result.push_str("\n\n🎯 计算结果:\n");
+            result.push_str("\n\n结果:\n");
             result.push_str(result_data);
         }
 
         if let Some(logs) = &task.logs {
-            result.push_str(&format!("\n\n📄 日志:\n{}", logs));
+            result.push_str(&format!("\n\n日志:\n{}", logs));
         }
 
         Ok(result)
@@ -710,23 +730,15 @@ impl Tool for ListTasks {
         let client = CalphaMeshClient::new(args.api_key.clone());
         let list = client.list_tasks(args.page, args.items_per_page).await?;
 
-        let mut result = format!("📋 我的任务列表 (第 {} 页，共 {} 页)\n\n", list.page, list.total_pages);
+        let mut result = format!("任务列表 (第{}页/共{}页)\n\n", list.page, list.total_pages);
 
         if list.data.is_empty() {
-            result.push_str("🤷‍♂️ 暂无任务");
+            result.push_str("暂无任务");
         } else {
             for (idx, task) in list.data.iter().enumerate() {
-                let status_emoji = match task.status.as_str() {
-                    "pending" => "⏳",
-                    "queued" => "📋",
-                    "running" => "⚙️",
-                    "completed" => "✅",
-                    "failed" => "❌",
-                    _ => "❓"
-                };
                 result.push_str(&format!(
-                    "{}. {} ID:{} | {} | {} | {}\n",
-                    idx + 1, status_emoji, task.id, task.task_type, task.status, task.title
+                    "{}. [{}] {} | {} | {}\n",
+                    idx + 1, task.status, task.id, task.task_type, task.title
                 ));
             }
         }

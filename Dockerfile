@@ -25,7 +25,7 @@ COPY rig ./rig
 RUN cargo build --release --locked
 
 # 阶段 2: 运行时环境
-FROM debian:bookworm-slim
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 
 

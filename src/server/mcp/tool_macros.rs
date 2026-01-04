@@ -88,10 +88,10 @@ macro_rules! register_mcp_tools {
 macro_rules! register_all_mcp_tools {
     ($registry:expr) => {
         $crate::register_mcp_tools!($registry,
-            ThinkTool {
-                args_type: ThinkArgs,
-                constructor: ThinkTool
-            },
+            // ThinkTool {
+            //     args_type: ThinkArgs,
+            //     constructor: ThinkTool
+            // },
             // TopPhiSimulator {
             //     args_type: TopPhiArgs,
             //     constructor: TopPhiSimulator
