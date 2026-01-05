@@ -112,12 +112,30 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
     let any_agent = agent.into();
     let agent = any_agent.inner_agent().clone();
 
-    match agent.prompt(&request.message).await {
-        Ok(response) => {
+    // 使用 completion_request 获取完整响应（包含 token usage）
+    match agent.model.completion_request(&request.message).send().await {
+        Ok(completion_response) => {
+            // 提取响应文本
+            let content = completion_response.choice
+                .iter()
+                .filter_map(|c| match c {
+                    rig::completion::AssistantContent::Text(text) => Some(text.text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            
+            // 转换 Usage 到我们的 TokenUsage 格式
+            let usage = Some(TokenUsage {
+                prompt_tokens: completion_response.usage.input_tokens as u32,
+                completion_tokens: completion_response.usage.output_tokens as u32,
+                total_tokens: completion_response.usage.total_tokens as u32,
+            });
+
             let chat_response = ChatResponse {
-                content: response,
+                content,
                 model: request.model,
-                usage: None,
+                usage,
                 conversation_id: request.conversation_id.expect("conversation_id should exist"),
                 timestamp: chrono::Local::now(),
                 metadata: HashMap::new(),

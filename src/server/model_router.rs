@@ -30,6 +30,9 @@ impl ModelRouter {
         // 注册Ollama模型
         router.register("ollama-qwen3-4b", |req, auth_user| Box::pin(ollama::ollama_qwen3_4b(req, auth_user)));
         router.register("ollama-llama3", |req, auth_user| Box::pin(ollama::ollama_llama3(req, auth_user)));
+        router.register("calphamesh", |req, auth_user| Box::pin(qwen::CalphaMesh(req, auth_user)));
+        router.register("phase-field", |req, auth_user| Box::pin(qwen::PhaseField(req, auth_user)));
+        router.register("ML-server", |req, auth_user| Box::pin(qwen::ML_Server(req, auth_user)));
 
         router.register("coating", |req, auth_user| Box::pin(coating_optimization::coating_optimization(req, auth_user)));
         router

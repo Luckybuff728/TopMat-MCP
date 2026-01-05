@@ -162,13 +162,13 @@ impl AuthClient {
                 username: "test_user".to_string(),
                 email: "test@example.com".to_string(),
                 subscription_level: "pro".to_string(),
-                subscription_expires_at: Some("2025-12-31T23:59:59Z".to_string()),
+                subscription_expires_at: Some("2026-12-31T23:59:59Z".to_string()),
             };
 
             let mock_api_key_info = ApiKeyInfo {
                 api_key: "tk_mock123456789".to_string(),
                 created_at: "2024-01-01T00:00:00Z".to_string(),
-                expires_at: Some("2025-12-31T23:59:59Z".to_string()),
+                expires_at: Some("2026-12-31T23:59:59Z".to_string()),
                 id: 1,
                 is_active: true,
                 key_name: "Test Mock API Key".to_string(),
