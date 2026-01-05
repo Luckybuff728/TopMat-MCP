@@ -12,6 +12,7 @@ use axum::{
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use serde_json::Value;
+use sqlx::Row;
 use tracing::{info, error, debug, warn};
 
 use crate::server::{
@@ -191,9 +192,12 @@ impl McpStorage {
 
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO mcp_sessions
+            INSERT INTO mcp_sessions
             (session_id, user_id, transport_type, client_info, last_activity_at)
-            VALUES (?1, ?2, ?3, ?4, datetime('now'))
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (session_id) DO UPDATE SET
+                last_activity_at = NOW(),
+                client_info = EXCLUDED.client_info
             "#
         )
         .bind(&context.session_id)
@@ -224,7 +228,8 @@ impl McpStorage {
                     r#"
                     INSERT INTO mcp_tool_calls
                     (user_id, session_id, tool_name, request_arguments, status, transport_type, endpoint)
-                    VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6)
+                    VALUES ($1, $2, $3, $4, 'pending', $5, $6)
+                    RETURNING id
                     "#
                 )
                 .bind(context.user_id)
@@ -233,10 +238,10 @@ impl McpStorage {
                 .bind(arguments_json)
                 .bind(&context.transport_type)
                 .bind(&context.endpoint)
-                .execute(db.pool())
+                .fetch_one(db.pool())
                 .await?;
 
-                let row_id = result.last_insert_rowid();
+                let row_id: i64 = result.try_get("id").unwrap_or(0);
                 info!("McpStorage: 已记录工具调用请求: {} (session: {}, id: {})", tool_name, context.session_id, row_id);
                 return Ok(Some(row_id));
             }
@@ -385,13 +390,13 @@ impl McpStorage {
         let query_result = sqlx::query(
             r#"
             UPDATE mcp_tool_calls
-            SET response_result = ?1,
-                execution_time_ms = ?2,
-                status = ?3,
-                error_message = ?4
+            SET response_result = $1,
+                execution_time_ms = $2,
+                status = $3,
+                error_message = $4
             WHERE id = (
                 SELECT id FROM mcp_tool_calls 
-                WHERE session_id = ?5 AND tool_name = ?6 AND status = 'pending'
+                WHERE session_id = $5 AND tool_name = $6 AND status = 'pending'
                 ORDER BY id DESC LIMIT 1
             )
             "#
@@ -430,7 +435,7 @@ impl McpStorage {
             INSERT INTO mcp_tool_calls
             (user_id, session_id, tool_name, request_arguments, response_result,
              execution_time_ms, status, error_message, transport_type, endpoint)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#
         )
         .bind(user_id)

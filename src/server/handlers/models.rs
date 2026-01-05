@@ -24,7 +24,18 @@ use super::chat::ServerState;
 pub async fn list_models_handler(
     State(_state): State<ServerState>,
 ) -> Json<Value> {
-    let models = get_model_router().get_available_models();
+    let mut models = get_model_router().get_available_models();
+    
+    // 按特定顺序排序
+    let order = [
+        "qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash", "qwq-plus",
+        "calphamesh", "phase-field", "ml-server",
+        "ollama-qwen3-4b", "ollama-llama3", "coating"
+    ];
+
+    models.sort_by_key(|name| {
+        order.iter().position(|&x| x == name).unwrap_or(usize::MAX)
+    });
 
     let response = serde_json::json!({
         "models": models.iter().map(|model| {
@@ -75,7 +86,7 @@ pub async fn list_models_handler(
                     "description": "Ollama本地Qwen3 4B参数版本",
                     "supports_streaming": true,
                     "max_tokens": 4096,
-                    "cost_per_1k_tokens": 0.0000
+                    "cost_per_1k_tokens": 0.0001
                 }),
                 "ollama-llama3" => serde_json::json!({
                     "name": "ollama-llama3",
@@ -83,7 +94,39 @@ pub async fn list_models_handler(
                     "description": "Ollama本地Llama3模型",
                     "supports_streaming": true,
                     "max_tokens": 4096,
-                    "cost_per_1k_tokens": 0.0000
+                    "cost_per_1k_tokens": 0.00001
+                }),
+                "calphamesh" => serde_json::json!({
+                    "name": "calphamesh",
+                    "provider": "qwen",
+                    "description": "Calphamesh智能体，可以调用Calphamesh工具",
+                    "supports_streaming": true,
+                    "max_tokens": 4096,
+                    "cost_per_1k_tokens": 0.0010
+                }),
+                "phase-field" => serde_json::json!({
+                    "name": "phase-field",
+                    "provider": "qwen",
+                    "description": "Phase-field智能体，可以调用Phase-field工具",
+                    "supports_streaming": true,
+                    "max_tokens": 4096,
+                    "cost_per_1k_tokens": 0.0010
+                }),
+                "ml-server" => serde_json::json!({
+                    "name": "ml-server",
+                    "provider": "qwen",
+                    "description": "ML-Server智能体，可以调用ONNX-Server工具",
+                    "supports_streaming": true,
+                    "max_tokens": 4096,
+                    "cost_per_1k_tokens": 0.0010
+                }),
+                "coating" => serde_json::json!({
+                    "name": "coating",
+                    "provider": "qwen",
+                    "description": "涂层优化智能体，可以调用涂层优化工具(测试)",
+                    "supports_streaming": true,
+                    "max_tokens": 4096,
+                    "cost_per_1k_tokens": 0.0010
                 }),
                 _ => serde_json::json!({
                     "name": model,

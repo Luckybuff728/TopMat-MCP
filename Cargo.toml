@@ -38,7 +38,7 @@ rmcp = { version = "0.8", features = [
     "transport-sse-server",
 ] }
 # Database dependencies
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
 tokio-util = "0.7"
 base64 = "0.22"
 utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }

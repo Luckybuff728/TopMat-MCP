@@ -19,7 +19,7 @@
 - **会话隔离**: 每个连接独立的 CancellationToken，支持多客户端并发
 
 ### 💾 数据管理
-- **对话持久化**: SQLite 存储，支持完整的对话历史和角色管理
+- **对话持久化**: PostgreSQL 存储，支持完整的对话历史、角色管理和高并发访
 - **使用统计**: 详细的 Token 使用、成本跟踪和性能分析
 - **MCP 分析**: 工具调用统计、会话跟踪和成功率监控
 
@@ -104,7 +104,7 @@ cp .env.example .env
 ### 系统要求
 
 - **Rust**: 1.88+ 或更高版本（Edition 2024）
-- **SQLite**: 数据库存储（自动创建）
+- **PostgreSQL**: 14+ 数据库服务（支持云数据库或本地部署）
 - **API 密钥**: 至少一个 AI 提供商的 API 密钥
 - **操作系统**: Windows、Linux、macOS
 
@@ -148,7 +148,7 @@ SERVER_PORT=3000
 RUST_LOG=info
 
 # 数据库
-DATABASE_URL=sqlite:data.db
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
 
 # 认证服务
 AUTH_API_URL=https://api.topmaterial-tech.com
@@ -172,14 +172,14 @@ MCP_API_KEY=your_mcp_api_key
 ```bash
 # 最低工作配置
 DASHSCOPE_API_KEY=your_qwen_api_key
-DATABASE_URL=sqlite:data.db
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
 ```
 
 ### 默认配置
 
 - **默认模型**: `qwen-plus`
 - **服务端口**: `3000` (Docker 容器映射到 `10007`)
-- **数据库**: 自动创建 SQLite 文件
+- **数据库**: PostgreSQL (需配置 DATABASE_URL)
 - **日志级别**: `info` (可通过 `RUST_LOG` 调整)
 - **API 文档**: 启动后访问 `/swagger-ui`
 - **时区配置**: 默认 `Asia/Shanghai` (北京时间)，支持日志与响应本地化
@@ -318,7 +318,7 @@ curl -N http://localhost:3000/sse/ \
 ### 核心组件
 
 - **Axum Web 服务器**: 高性能异步 Web 框架
-- **SQLite 数据库**: 持久化存储，全面的架构设计
+- **PostgreSQL 数据库**: 高性能持久化存储，支持高并发与复杂查询
 - **MCP 服务器**: 模型上下文协议实现
 - **Agent 系统**: 多提供商 AI 模型集成
 - **工具注册表**: 动态工具发现和注册

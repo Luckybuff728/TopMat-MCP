@@ -330,7 +330,7 @@ async fn save_user_message(
     sqlx::query(
         r#"
         INSERT INTO messages (conversation_id, role, content, model, created_at)
-        VALUES (?1, ?2, ?3, ?4, datetime('now'))
+        VALUES ($1, $2, $3, $4, NOW())
         "#
     )
     .bind(conversation_id)
@@ -353,7 +353,7 @@ async fn save_assistant_message(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 验证对话权限
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(conversation_id)
     .bind(user_id)
@@ -380,7 +380,7 @@ async fn save_assistant_message(
     sqlx::query(
         r#"
         INSERT INTO messages (conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
         "#
     )
     .bind(conversation_id)
@@ -396,7 +396,7 @@ async fn save_assistant_message(
 
     // 更新对话的最后更新时间和消息计数
     sqlx::query(
-        "UPDATE conversations SET updated_at = datetime('now'), message_count = message_count + 2 WHERE conversation_id = ? AND user_id = ?"
+        "UPDATE conversations SET updated_at = NOW(), message_count = message_count + 2 WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(conversation_id)
     .bind(user_id)
@@ -416,7 +416,7 @@ async fn ensure_conversation_exists(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 检查对话是否存在
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(conversation_id)
     .bind(user_id)
@@ -426,13 +426,38 @@ async fn ensure_conversation_exists(
     if conversation_exists {
         // 更新现有对话
         sqlx::query(
-            "UPDATE conversations SET updated_at = datetime('now'), message_count = message_count + 1 WHERE conversation_id = ? AND user_id = ?"
+            "UPDATE conversations SET updated_at = NOW(), message_count = message_count + 1 WHERE conversation_id = $1 AND user_id = $2"
         )
         .bind(conversation_id)
         .bind(user_id)
         .execute(db.pool())
         .await?;
     } else {
+        // 先确保用户存在（避免外键约束违规）
+        let user_exists: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM users WHERE id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(db.pool())
+        .await?;
+
+        if !user_exists {
+            // 创建临时用户记录（将在认证缓存时被更新）
+            info!("MessageStorage: 用户 {} 不存在，创建临时用户记录", user_id);
+            sqlx::query(
+                r#"
+                INSERT INTO users (id, username, email, subscription_level, created_at, updated_at)
+                VALUES ($1, $2, $3, 'free', NOW(), NOW())
+                ON CONFLICT (id) DO NOTHING
+                "#
+            )
+            .bind(user_id)
+            .bind(format!("user_{}", user_id))
+            .bind(format!("user_{}@temp.local", user_id))
+            .execute(db.pool())
+            .await?;
+        }
+
         // 创建新对话
         let title = if message.chars().count() > 50 {
             message.chars().take(50).collect::<String>() + "..."
@@ -443,7 +468,7 @@ async fn ensure_conversation_exists(
         sqlx::query(
             r#"
             INSERT INTO conversations (conversation_id, user_id, title, model, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))
+            VALUES ($1, $2, $3, $4, NOW(), NOW())
             "#
         )
         .bind(conversation_id)

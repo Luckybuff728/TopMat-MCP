@@ -77,7 +77,7 @@ pub async fn get_usage_stats_handler(
             COALESCE(SUM(total_tokens), 0) as total_tokens,
             COUNT(*) * 0.001 as estimated_cost
         FROM messages
-        WHERE created_at BETWEEN ? AND ?
+        WHERE created_at BETWEEN $1 AND $2
             AND role = 'assistant'
             AND model IS NOT NULL
         GROUP BY model
@@ -85,8 +85,8 @@ pub async fn get_usage_stats_handler(
     ";
 
     let rows = sqlx::query(usage_sql)
-        .bind(from_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
-        .bind(to_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(from_date_utc)
+        .bind(to_date_utc)
         .fetch_all(state.database.pool())
         .await
         .map_err(|e| {
@@ -129,31 +129,20 @@ pub async fn get_usage_stats_handler(
         total_cost += cost;
     }
 
-    // 查询平均响应时间（从metadata中提取）
+    // 查询平均响应时间（使用PostgreSQL JSON提取语法）
     let response_time_sql = "
         SELECT
-            AVG(CAST(
-                CASE
-                    WHEN metadata LIKE '%response_time_ms%'
-                    THEN CAST(SUBSTR(metadata, INSTR(metadata, 'response_time_ms') + 19,
-                           CASE
-                               WHEN INSTR(SUBSTR(metadata, INSTR(metadata, 'response_time_ms') + 19), ',') > 0
-                               THEN INSTR(SUBSTR(metadata, INSTR(metadata, 'response_time_ms') + 19), ',') - 1
-                               ELSE LENGTH(SUBSTR(metadata, INSTR(metadata, 'response_time_ms') + 19))
-                           END) AS INTEGER)
-                    ELSE NULL
-                END AS REAL
-            )) as avg_response_time
+            AVG(CAST(metadata::json->>'response_time_ms' AS REAL)) as avg_response_time
         FROM messages
-        WHERE created_at BETWEEN ? AND ?
+        WHERE created_at BETWEEN $1 AND $2
             AND role = 'assistant'
             AND metadata IS NOT NULL
             AND metadata LIKE '%response_time_ms%'
     ";
 
     let avg_response_time_ms = sqlx::query(response_time_sql)
-        .bind(from_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
-        .bind(to_date_utc.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(from_date_utc)
+        .bind(to_date_utc)
         .fetch_optional(state.database.pool())
         .await
         .map_err(|e| {
@@ -350,19 +339,19 @@ async fn check_database_config() -> ServiceStatus {
     // 检查环境变量中的数据库配置
     match std::env::var("DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => {
-            // 验证数据库URL格式
-            if database_url.starts_with("sqlite:") {
-                tracing::info!("检测到SQLite数据库配置: {}", database_url);
+            // 验证数据库URL格式 (PostgreSQL)
+            if database_url.starts_with("postgresql://") || database_url.starts_with("postgres://") {
+                tracing::info!("检测到PostgreSQL数据库配置: {}", database_url);
                 ServiceStatus::Healthy
             } else {
-                tracing::error!("不支持的数据库类型: {}", database_url);
+                tracing::error!("不支持的数据库类型，请使用 postgresql:// 连接串: {}", database_url);
                 ServiceStatus::Unhealthy
             }
         }
         Ok(_) | Err(_) => {
-            // 使用默认的SQLite数据库路径
+            // 使用默认的PostgreSQL数据库配置
             let default_url = get_default_database_url();
-            tracing::info!("使用默认数据库配置: {}", default_url);
+            tracing::info!("使用默认数据库配置");
             ServiceStatus::Healthy
         }
     }

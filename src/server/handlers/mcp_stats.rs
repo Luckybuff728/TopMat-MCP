@@ -63,7 +63,7 @@ pub async fn get_mcp_usage_stats_handler(
 
     // 获取会话统计
     let total_sessions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mcp_sessions WHERE user_id = ?"
+        "SELECT COUNT(*) FROM mcp_sessions WHERE user_id = $1"
     )
     .bind(user_id)
     .fetch_one(state.database.pool())
@@ -77,7 +77,7 @@ pub async fn get_mcp_usage_stats_handler(
 
     // 获取工具调用统计
     let total_tool_calls: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = ?"
+        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = $1"
     )
     .bind(user_id)
     .fetch_one(state.database.pool())
@@ -91,7 +91,7 @@ pub async fn get_mcp_usage_stats_handler(
 
     // 获取成功调用数量
     let success_calls: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = ? AND status = 'success'"
+        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = $1 AND status = 'success'"
     )
     .bind(user_id)
     .fetch_one(state.database.pool())
@@ -105,7 +105,7 @@ pub async fn get_mcp_usage_stats_handler(
 
     // 获取唯一工具数量
     let unique_tools_used: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT tool_name) FROM mcp_tool_calls WHERE user_id = ? AND status = 'success'"
+        "SELECT COUNT(DISTINCT tool_name) FROM mcp_tool_calls WHERE user_id = $1 AND status = 'success'"
     )
     .bind(user_id)
     .fetch_one(state.database.pool())
@@ -119,7 +119,7 @@ pub async fn get_mcp_usage_stats_handler(
 
     // 获取传输类型统计
     let transport_rows = sqlx::query(
-        "SELECT transport_type, COUNT(*) as count FROM mcp_tool_calls WHERE user_id = ? GROUP BY transport_type"
+        "SELECT transport_type, COUNT(*) as count FROM mcp_tool_calls WHERE user_id = $1 GROUP BY transport_type"
     )
     .bind(user_id)
     .fetch_all(state.database.pool())
@@ -202,7 +202,7 @@ pub async fn get_mcp_sessions_handler(
     let offset = (page - 1) * limit;
 
     // 构建查询条件
-    let mut where_clause = "WHERE user_id = ?".to_string();
+    let mut where_clause = "WHERE user_id = $1".to_string();
     if let Some(ref transport) = params.transport_type {
         where_clause.push_str(&format!(" AND transport_type = '{}'", transport));
     }
@@ -222,7 +222,7 @@ pub async fn get_mcp_sessions_handler(
 
     // 获取会话列表
     let sessions_query = format!(
-        "SELECT session_id, transport_type, created_at, last_activity_at FROM mcp_sessions {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        "SELECT session_id, transport_type, created_at, last_activity_at FROM mcp_sessions {} ORDER BY created_at DESC LIMIT $2 OFFSET $3",
         where_clause
     );
     let sessions = sqlx::query(&sessions_query)
@@ -247,7 +247,7 @@ pub async fn get_mcp_sessions_handler(
 
         // 获取每个会话的工具调用数量
         let tool_calls_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM mcp_tool_calls WHERE session_id = ?"
+            "SELECT COUNT(*) FROM mcp_tool_calls WHERE session_id = $1"
         )
         .bind(&session_id)
         .fetch_one(state.database.pool())
@@ -326,7 +326,7 @@ pub async fn get_mcp_tool_calls_handler(
     let offset = (page - 1) * limit;
 
     // 构建查询条件
-    let mut where_clause = "WHERE user_id = ?".to_string();
+    let mut where_clause = "WHERE user_id = $1".to_string();
     if let Some(ref transport) = params.transport_type {
         where_clause.push_str(&format!(" AND transport_type = '{}'", transport));
     }
@@ -349,7 +349,7 @@ pub async fn get_mcp_tool_calls_handler(
 
     // 获取工具调用记录
     let calls_query = format!(
-        "SELECT session_id, tool_name, request_arguments, response_result, status, error_message, transport_type, endpoint, execution_time_ms, created_at FROM mcp_tool_calls {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        "SELECT session_id, tool_name, request_arguments, response_result, status, error_message, transport_type, endpoint, execution_time_ms, created_at FROM mcp_tool_calls {} ORDER BY created_at DESC LIMIT $2 OFFSET $3",
         where_clause
     );
     let tool_calls = sqlx::query(&calls_query)
@@ -452,7 +452,7 @@ pub async fn get_comprehensive_stats_handler(
 
     // 获取聊天统计（简化版本）
     let total_conversations: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM conversations WHERE user_id = ?"
+        "SELECT COUNT(*) FROM conversations WHERE user_id = $1"
     )
     .bind(user_id)
     .fetch_one(state.database.pool())
@@ -460,7 +460,7 @@ pub async fn get_comprehensive_stats_handler(
     .unwrap_or(0);
 
     let total_messages: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM messages WHERE conversation_id IN (SELECT conversation_id FROM conversations WHERE user_id = ?)"
+        "SELECT COUNT(*) FROM messages WHERE conversation_id IN (SELECT conversation_id FROM conversations WHERE user_id = $1)"
     )
     .bind(user_id)
     .fetch_one(state.database.pool())

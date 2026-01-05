@@ -79,7 +79,7 @@ pub async fn list_messages_handler(
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -109,19 +109,15 @@ pub async fn list_messages_handler(
         });
     }
 
-    // 构建基本查询SQL
-    let mut sql = String::from(
-        "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
-         FROM messages WHERE conversation_id = ?"
-    );
-
-    // 添加消息ID过滤（如果指定了before参数）
-    if let Some(before_id) = params.before {
-        sql.push_str(" AND message_id < ?");
-    }
-
-    // 添加排序和分页
-    sql.push_str(" ORDER BY created_at ASC, message_id ASC LIMIT ? OFFSET ?");
+    // 构建基本查询SQL - 使用PostgreSQL参数占位符
+    let base_sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
+         FROM messages WHERE conversation_id = $1";
+    
+    let (sql, param_offset) = if let Some(_before_id) = params.before {
+        (format!("{} AND message_id < $2 ORDER BY created_at ASC, message_id ASC LIMIT $3 OFFSET $4", base_sql), 2)
+    } else {
+        (format!("{} ORDER BY created_at ASC, message_id ASC LIMIT $2 OFFSET $3", base_sql), 1)
+    };
 
     // 执行查询
     let mut query = sqlx::query(&sql);
@@ -179,7 +175,7 @@ pub async fn list_messages_handler(
         .collect();
 
     // 获取总数
-    let total_sql = "SELECT COUNT(*) FROM messages WHERE conversation_id = ?";
+    let total_sql = "SELECT COUNT(*) FROM messages WHERE conversation_id = $1";
     let mut total_query = sqlx::query(total_sql);
     total_query = total_query.bind(&conversation_id);
 
@@ -261,7 +257,7 @@ pub async fn get_message_handler(
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -293,7 +289,7 @@ pub async fn get_message_handler(
     }
 
     let sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
-              FROM messages WHERE message_id = ? AND conversation_id = ?";
+              FROM messages WHERE message_id = $1 AND conversation_id = $2";
 
     let row = sqlx::query(sql)
         .bind(message_id as i64)
@@ -376,7 +372,7 @@ pub async fn delete_message_handler(
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -407,7 +403,7 @@ pub async fn delete_message_handler(
         });
     }
 
-    let sql = "DELETE FROM messages WHERE message_id = ? AND conversation_id = ?";
+    let sql = "DELETE FROM messages WHERE message_id = $1 AND conversation_id = $2";
 
     let result = sqlx::query(sql)
         .bind(message_id as i64)
@@ -461,7 +457,7 @@ pub async fn add_message_handler(
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -497,19 +493,19 @@ pub async fn add_message_handler(
         .and_then(|m| serde_json::to_string(m).ok());
 
     let sql = "INSERT INTO messages (conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at) \
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING message_id";
 
     let result = sqlx::query(sql)
         .bind(&conversation_id)
         .bind(&request.role)
         .bind(&request.content)
         .bind(&request.model)
-        .bind(request.usage.as_ref().map(|u| u.prompt_tokens))
-        .bind(request.usage.as_ref().map(|u| u.completion_tokens))
-        .bind(request.usage.as_ref().map(|u| u.total_tokens))
+        .bind(request.usage.as_ref().map(|u| u.prompt_tokens as i32))
+        .bind(request.usage.as_ref().map(|u| u.completion_tokens as i32))
+        .bind(request.usage.as_ref().map(|u| u.total_tokens as i32))
         .bind(metadata_str)
         .bind(chrono::Local::now())
-        .execute(state.database.pool())
+        .fetch_one(state.database.pool())
         .await
         .map_err(|e| {
             error!("添加消息失败: {}", e);
@@ -523,10 +519,10 @@ pub async fn add_message_handler(
             }
         })?;
 
-    let message_id = result.last_insert_rowid();
+    let message_id: i64 = result.try_get("message_id").unwrap_or(0);
 
     // 更新对话的消息计数和更新时间
-    let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = ? WHERE conversation_id = ?";
+    let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = $1 WHERE conversation_id = $2";
     sqlx::query(update_sql)
         .bind(chrono::Local::now())
         .bind(&conversation_id)

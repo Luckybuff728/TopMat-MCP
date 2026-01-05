@@ -1,17 +1,15 @@
-use sqlx::{Pool, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
-use std::str::FromStr;
-use std::path::Path;
+use sqlx::{Pool, Postgres, PgPool, postgres::PgPoolOptions};
 use tracing::{info, error};
 
 /// 数据库连接池
 #[derive(Clone)]
 pub struct DatabaseConnection {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl DatabaseConnection {
     /// 获取数据库连接池
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 
@@ -38,20 +36,11 @@ impl DatabaseConnection {
 pub async fn init_database(database_url: &str) -> Result<DatabaseConnection, sqlx::Error> {
     info!("正在初始化数据库连接: {}", database_url);
 
-    // 确保数据库目录存在
-    if let Some(parent) = Path::new(database_url.strip_prefix("sqlite:").unwrap_or(database_url)).parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| sqlx::Error::Io(e))?;
-            info!("创建数据库目录: {:?}", parent);
-        }
-    }
-
-    // 创建连接池，使用连接选项
-    let pool = SqlitePool::connect_with(
-        SqliteConnectOptions::from_str(database_url)?
-            .create_if_missing(true)
-    ).await?;
+    // 创建 PostgreSQL 连接池
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(database_url)
+        .await?;
 
     info!("数据库连接池创建成功");
 
@@ -64,20 +53,20 @@ pub async fn init_database(database_url: &str) -> Result<DatabaseConnection, sql
 }
 
 /// 运行数据库迁移
-async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     info!("正在运行数据库迁移...");
 
     // 创建用户表
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
             email TEXT NOT NULL UNIQUE,
             subscription_level TEXT NOT NULL DEFAULT 'free',
-            subscription_expires_at TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            subscription_expires_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
     )
@@ -88,16 +77,15 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS api_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id),
             api_key TEXT NOT NULL UNIQUE,
             key_name TEXT NOT NULL,
-            is_active BOOLEAN NOT NULL DEFAULT 1,
-            expires_at TEXT,
-            last_used_at TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            expires_at TIMESTAMPTZ,
+            last_used_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
     )
@@ -109,14 +97,13 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         r#"
         CREATE TABLE IF NOT EXISTS conversations (
             conversation_id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
+            user_id BIGINT NOT NULL REFERENCES users(id),
             title TEXT,
             model TEXT NOT NULL,
             message_count INTEGER DEFAULT 0,
             summary TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
     )
@@ -127,8 +114,8 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS messages (
-            message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id TEXT NOT NULL,
+            message_id BIGSERIAL PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id),
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             model TEXT,
@@ -136,8 +123,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             completion_tokens INTEGER,
             total_tokens INTEGER,
             metadata TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (conversation_id) REFERENCES conversations (conversation_id)
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
     )
@@ -148,17 +134,16 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS usage_stats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id),
             model TEXT NOT NULL,
             request_date TEXT NOT NULL,
             request_count INTEGER DEFAULT 0,
             token_count INTEGER DEFAULT 0,
             cost_usd REAL DEFAULT 0.0,
             avg_response_time_ms REAL DEFAULT 0.0,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(user_id, model, request_date)
         )
         "#,
@@ -170,13 +155,13 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS mcp_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             session_id TEXT UNIQUE NOT NULL,
-            user_id INTEGER NOT NULL,
-            transport_type TEXT NOT NULL,  -- 'http' 或 'sse'
-            client_info TEXT,  -- 客户端信息JSON
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_activity_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            user_id BIGINT NOT NULL,
+            transport_type TEXT NOT NULL,
+            client_info TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
     )
@@ -187,18 +172,18 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS mcp_tool_calls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
             session_id TEXT,
             tool_name TEXT NOT NULL,
-            request_arguments TEXT,  -- JSON格式
-            response_result TEXT,    -- JSON格式
+            request_arguments TEXT,
+            response_result TEXT,
             execution_time_ms INTEGER,
-            status TEXT NOT NULL,  -- 'success', 'error', 'timeout'
+            status TEXT NOT NULL,
             error_message TEXT,
-            transport_type TEXT NOT NULL,  -- 'http' 或 'sse'
-            endpoint TEXT NOT NULL,  -- '/mcp' 或 '/sse/mcp'
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            transport_type TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
     )
@@ -214,7 +199,6 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
-    
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)")
         .execute(pool)
         .await?;
@@ -254,13 +238,6 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 /// 获取默认数据库URL
 pub fn get_default_database_url() -> String {
-    // 获取当前工作目录的绝对路径
-    let current_dir = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-
-    let db_path = current_dir.join("data").join("topmat_llm.db");
-
-    // 转换为绝对路径字符串
-    let db_path_str = db_path.to_string_lossy();
-    format!("sqlite:{}", db_path_str)
+    // 云端 PostgreSQL 数据库
+    "postgresql://llm:dckj@zndx@139.159.198.14:5432/llm".to_string()
 }

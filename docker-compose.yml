@@ -9,7 +9,7 @@ services:
     environment:
       - RUST_LOG=info
       - TZ=Asia/Shanghai
-      - DATABASE_URL=sqlite:/app/data/data.db
+      - DATABASE_URL=postgresql://llm:dckj%40zndx@139.159.198.14:5432/llm
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=3000
     volumes:

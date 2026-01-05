@@ -45,19 +45,15 @@ pub async fn list_conversations_handler(
     // 从认证信息中获取真实用户ID
     let user_id = auth_user.user_id as i64;
 
-    // 构建基本查询SQL
-    let mut sql = String::from(
-        "SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at \
-         FROM conversations WHERE user_id = ?"
-    );
+    // 构建基本查询SQL - 使用PostgreSQL参数占位符
+    let base_sql = "SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at \
+         FROM conversations WHERE user_id = $1";
 
-    // 添加搜索条件
-    if let Some(ref search) = params.search {
-        sql.push_str(" AND (title LIKE ? OR summary LIKE ?)");
-    }
-
-    // 添加排序和分页
-    sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
+    let (sql, _param_offset) = if params.search.is_some() {
+        (format!("{} AND (title LIKE $2 OR summary LIKE $3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5", base_sql), 2)
+    } else {
+        (format!("{} ORDER BY updated_at DESC LIMIT $2 OFFSET $3", base_sql), 1)
+    };
 
     // 执行查询
     let mut query = sqlx::query(&sql);
@@ -104,7 +100,7 @@ pub async fn list_conversations_handler(
         .collect();
 
     // 获取总数
-    let total_sql = "SELECT COUNT(*) FROM conversations WHERE user_id = ?";
+    let total_sql = "SELECT COUNT(*) FROM conversations WHERE user_id = $1";
     let mut total_query = sqlx::query(total_sql);
     total_query = total_query.bind(user_id);
 
@@ -199,7 +195,7 @@ pub async fn create_conversation_handler(
     sqlx::query(
         r#"
         INSERT INTO conversations (conversation_id, user_id, title, model, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
         "#
     )
     .bind(&conversation_id)
@@ -225,7 +221,7 @@ pub async fn create_conversation_handler(
         let message_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO messages (conversation_id, role, content, model, created_at)
-            VALUES (?1, ?2, ?3, ?4, datetime('now'))
+            VALUES ($1, $2, $3, $4, NOW())
             RETURNING message_id
             "#
         )
@@ -279,7 +275,7 @@ pub async fn create_conversation_handler(
         r#"
         SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at
         FROM conversations
-        WHERE conversation_id = ?
+        WHERE conversation_id = $1
         "#
     )
     .bind(&conversation_id)
@@ -350,7 +346,7 @@ pub async fn get_conversation_handler(
         r#"
         SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at
         FROM conversations
-        WHERE conversation_id = ? AND user_id = ?
+        WHERE conversation_id = $1 AND user_id = $2
         "#
     )
     .bind(&conversation_id)
@@ -437,8 +433,8 @@ pub async fn update_conversation_title_handler(
     let result = sqlx::query(
         r#"
         UPDATE conversations
-        SET title = ?, updated_at = datetime('now')
-        WHERE conversation_id = ? AND user_id = ?
+        SET title = $1, updated_at = NOW()
+        WHERE conversation_id = $2 AND user_id = $3
         "#
     )
     .bind(&request.title)
@@ -485,7 +481,7 @@ pub async fn update_conversation_title_handler(
         r#"
         SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at
         FROM conversations
-        WHERE conversation_id = ?
+        WHERE conversation_id = $1
         "#
     )
     .bind(&conversation_id)
@@ -570,7 +566,7 @@ pub async fn delete_conversation_handler(
 
     // 首先删除该对话的所有消息
     let delete_messages_result = sqlx::query(
-        "DELETE FROM messages WHERE conversation_id = ?"
+        "DELETE FROM messages WHERE conversation_id = $1"
     )
     .bind(&conversation_id)
     .execute(&mut *tx)
@@ -589,7 +585,7 @@ pub async fn delete_conversation_handler(
 
     // 删除对话本身
     let delete_conversation_result = sqlx::query(
-        "DELETE FROM conversations WHERE conversation_id = ? AND user_id = ?"
+        "DELETE FROM conversations WHERE conversation_id = $1 AND user_id = $2"
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)

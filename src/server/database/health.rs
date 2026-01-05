@@ -43,16 +43,16 @@ pub async fn check_database_config() -> ServiceStatus {
         Ok(database_url) if !database_url.is_empty() => {
             info!("检测到数据库URL配置: {}", database_url);
 
-            // 验证数据库URL格式
-            if database_url.starts_with("sqlite:") {
+            // 验证数据库URL格式 (PostgreSQL)
+            if database_url.starts_with("postgresql://") || database_url.starts_with("postgres://") {
                 ServiceStatus::Healthy
             } else {
-                error!("不支持的数据库类型: {}", database_url);
+                error!("不支持的数据库类型，请使用 postgresql:// 连接串: {}", database_url);
                 ServiceStatus::Unhealthy
             }
         }
         Ok(_) | Err(_) => {
-            // 使用默认的SQLite数据库路径
+            // 使用默认的PostgreSQL数据库配置
             let default_url = crate::server::database::connection::get_default_database_url();
             info!("使用默认数据库配置: {}", default_url);
             ServiceStatus::Healthy

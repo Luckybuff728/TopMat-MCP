@@ -69,7 +69,7 @@ impl AuthClient {
                 u.username, u.email, u.subscription_level, u.subscription_expires_at
             FROM api_keys ak
             JOIN users u ON ak.user_id = u.id
-            WHERE ak.api_key = ? AND ak.is_active = 1
+            WHERE ak.api_key = $1 AND ak.is_active = TRUE
         ";
 
         let row = sqlx::query(sql)
@@ -257,7 +257,7 @@ impl AuthClient {
         let mut tx = self.database.pool().begin().await?;
 
         // 检查用户是否已存在
-        let user_sql = "SELECT id FROM users WHERE username = ?";
+        let user_sql = "SELECT id FROM users WHERE username = $1";
         let existing_user = sqlx::query(user_sql)
             .bind(&auth_result.user_info.username)
             .fetch_optional(&mut *tx)
@@ -265,18 +265,25 @@ impl AuthClient {
 
         let user_id = if let Some(user_row) = existing_user {
             // 用户已存在，更新用户信息
+            // 解析 subscription_expires_at 字符串为 DateTime
+            let subscription_expires: Option<chrono::DateTime<chrono::Utc>> = auth_result
+                .user_info
+                .subscription_expires_at
+                .as_ref()
+                .and_then(|s| self.parse_datetime(s));
+            
             let update_sql = "
                 UPDATE users SET
-                    email = ?,
-                    subscription_level = ?,
-                    subscription_expires_at = ?,
-                    updated_at = ?
-                WHERE id = ?
+                    email = $1,
+                    subscription_level = $2,
+                    subscription_expires_at = $3,
+                    updated_at = $4
+                WHERE id = $5
             ";
             sqlx::query(update_sql)
                 .bind(&auth_result.user_info.email)
                 .bind(&auth_result.user_info.subscription_level)
-                .bind(&auth_result.user_info.subscription_expires_at)
+                .bind(subscription_expires)
                 .bind(chrono::Utc::now())
                 .bind(user_row.try_get::<i64, _>("id").unwrap_or(0))
                 .execute(&mut *tx)
@@ -285,25 +292,33 @@ impl AuthClient {
             user_row.try_get::<i64, _>("id").unwrap_or(0)
         } else {
             // 创建新用户
+            // 解析 subscription_expires_at 字符串为 DateTime
+            let subscription_expires: Option<chrono::DateTime<chrono::Utc>> = auth_result
+                .user_info
+                .subscription_expires_at
+                .as_ref()
+                .and_then(|s| self.parse_datetime(s));
+            
             let insert_sql = "
                 INSERT INTO users (username, email, subscription_level, subscription_expires_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
             ";
             let result = sqlx::query(insert_sql)
                 .bind(&auth_result.user_info.username)
                 .bind(&auth_result.user_info.email)
                 .bind(&auth_result.user_info.subscription_level)
-                .bind(&auth_result.user_info.subscription_expires_at)
+                .bind(subscription_expires)
                 .bind(chrono::Utc::now())
                 .bind(chrono::Utc::now())
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await?;
 
-            result.last_insert_rowid()
+            result.try_get::<i64, _>("id").unwrap_or(0)
         };
 
         // 检查API密钥是否已存在
-        let key_sql = "SELECT id FROM api_keys WHERE api_key = ?";
+        let key_sql = "SELECT id FROM api_keys WHERE api_key = $1";
         let existing_key = sqlx::query(key_sql)
             .bind(api_key)
             .fetch_optional(&mut *tx)
@@ -311,39 +326,53 @@ impl AuthClient {
 
         if let Some(key_row) = existing_key {
             // API密钥已存在，更新信息
+            // 解析 expires_at 字符串为 DateTime
+            let expires_at: Option<chrono::DateTime<chrono::Utc>> = auth_result
+                .api_key_info
+                .expires_at
+                .as_ref()
+                .and_then(|s| self.parse_datetime(s));
+            
             let update_key_sql = "
                 UPDATE api_keys SET
-                    user_id = ?,
-                    key_name = ?,
-                    is_active = ?,
-                    expires_at = ?,
-                    last_used_at = ?,
-                    updated_at = ?
-                WHERE id = ?
+                    user_id = $1,
+                    key_name = $2,
+                    is_active = $3,
+                    expires_at = $4,
+                    last_used_at = $5,
+                    updated_at = $6
+                WHERE id = $7
             ";
             sqlx::query(update_key_sql)
                 .bind(user_id)
                 .bind(&auth_result.api_key_info.key_name)
                 .bind(auth_result.api_key_info.is_active)
-                .bind(&auth_result.api_key_info.expires_at)
-                .bind(Some(chrono::Utc::now().to_rfc3339()))
+                .bind(expires_at)
+                .bind(Some(chrono::Utc::now()))
                 .bind(chrono::Utc::now())
                 .bind(key_row.try_get::<i64, _>("id").unwrap_or(0))
                 .execute(&mut *tx)
                 .await?;
         } else {
             // 创建新API密钥
+            // 解析 expires_at 字符串为 DateTime
+            let expires_at: Option<chrono::DateTime<chrono::Utc>> = auth_result
+                .api_key_info
+                .expires_at
+                .as_ref()
+                .and_then(|s| self.parse_datetime(s));
+            
             let insert_key_sql = "
                 INSERT INTO api_keys (user_id, api_key, key_name, is_active, expires_at, last_used_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ";
             sqlx::query(insert_key_sql)
                 .bind(user_id)
                 .bind(api_key)
                 .bind(&auth_result.api_key_info.key_name)
                 .bind(auth_result.api_key_info.is_active)
-                .bind(&auth_result.api_key_info.expires_at)
-                .bind(Some(chrono::Utc::now().to_rfc3339()))
+                .bind(expires_at)
+                .bind(Some(chrono::Utc::now()))
                 .bind(chrono::Utc::now())
                 .bind(chrono::Utc::now())
                 .execute(&mut *tx)
@@ -356,10 +385,10 @@ impl AuthClient {
 
     /// 更新API密钥最后使用时间
     async fn update_last_used_time(&self, api_key: &str) -> Result<(), sqlx::Error> {
-        let sql = "UPDATE api_keys SET last_used_at = ? WHERE api_key = ?";
+        let sql = "UPDATE api_keys SET last_used_at = $1 WHERE api_key = $2";
 
         sqlx::query(sql)
-            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(chrono::Utc::now())
             .bind(api_key)
             .execute(self.database.pool())
             .await?;
