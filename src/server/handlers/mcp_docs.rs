@@ -4,16 +4,14 @@
 //! MCP 请求由 RMCP 框架的 StreamableHttpService 处理
 
 use axum::{
-    extract::{Query, State, Extension},
+    extract::{Extension, Query, State},
     response::Json,
-    http::StatusCode,
 };
-use utoipa::path;
 use serde_json::json;
 
-use crate::server::models::*;
-use crate::server::middleware::auth::AuthUser;
 use super::chat::ServerState;
+use crate::server::middleware::auth::AuthUser;
+use crate::server::models::*;
 
 /// 获取 MCP 服务器信息
 ///
@@ -50,6 +48,7 @@ use super::chat::ServerState;
         ("bearerAuth" = [])
     )
 )]
+#[allow(dead_code)]
 pub async fn mcp_info_handler(
     Extension(_auth_user): Extension<AuthUser>,
     State(_state): State<ServerState>,
@@ -131,6 +130,7 @@ pub async fn mcp_info_handler(
         ("bearerAuth" = [])
     )
 )]
+#[allow(dead_code)]
 pub async fn mcp_tools_list_handler(
     Extension(_auth_user): Extension<AuthUser>,
     State(_state): State<ServerState>,
@@ -199,6 +199,7 @@ pub async fn mcp_tools_list_handler(
         ("bearerAuth" = [])
     )
 )]
+#[allow(dead_code)]
 pub async fn mcp_tool_call_handler(
     Extension(_auth_user): Extension<AuthUser>,
     State(_state): State<ServerState>,
@@ -253,6 +254,7 @@ pub async fn mcp_tool_call_handler(
         ("bearerAuth" = [])
     )
 )]
+#[allow(dead_code)]
 pub async fn sse_info_handler(
     Extension(_auth_user): Extension<AuthUser>,
     State(_state): State<ServerState>,
@@ -316,6 +318,7 @@ pub async fn sse_info_handler(
         ("bearerAuth" = [])
     )
 )]
+#[allow(dead_code)]
 pub async fn sse_message_handler(
     Extension(_auth_user): Extension<AuthUser>,
     State(_state): State<ServerState>,

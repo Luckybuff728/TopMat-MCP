@@ -1,13 +1,11 @@
-use axum::{
-    extract::{State, Request},
-    response::IntoResponse,
-};
+use axum::extract::{Request, State};
 use tracing::info;
-use utoipa::path;
 
-use crate::server::models::*;
-use crate::server::auth::{AuthClient, extract_api_key, create_auth_response, create_error_response, create_missing_api_key_response};
 use super::chat::ServerState;
+use crate::server::auth::{
+    create_auth_response, create_error_response, create_missing_api_key_response, extract_api_key,
+};
+use crate::server::models::*;
 
 /// 鉴权端点处理
 #[utoipa::path(
@@ -35,11 +33,16 @@ pub async fn auth_handler(
     info!("收到鉴权请求");
 
     // 验证API Key
-    match state.auth_client.verify_api_key(&extract_api_key(&request).unwrap()).await {
+    match state
+        .auth_client
+        .verify_api_key(&extract_api_key(&request).unwrap())
+        .await
+    {
         Ok(auth_result) => {
-            info!("用户鉴权成功: {} (订阅级别: {})",
-                  auth_result.user_info.username,
-                  auth_result.user_info.subscription_level);
+            info!(
+                "用户鉴权成功: {} (订阅级别: {})",
+                auth_result.user_info.username, auth_result.user_info.subscription_level
+            );
 
             Ok(create_auth_response(auth_result))
         }

@@ -1,13 +1,9 @@
-use axum::{
-    extract::State,
-    response::Json,
-};
+use axum::{extract::State, response::Json};
 use serde_json::Value;
-use utoipa::path;
 
-use crate::server::model_router::get_model_router;
-use crate::server::models::{ModelsResponse, ErrorResponse};
 use super::chat::ServerState;
+use crate::server::model_router::get_model_router;
+use crate::server::models::{ErrorResponse, ModelsResponse};
 
 /// 获取可用模型列表
 #[utoipa::path(
@@ -21,21 +17,25 @@ use super::chat::ServerState;
         (status = 500, description = "服务器内部错误", body = ErrorResponse)
     ),
 )]
-pub async fn list_models_handler(
-    State(_state): State<ServerState>,
-) -> Json<Value> {
+pub async fn list_models_handler(State(_state): State<ServerState>) -> Json<Value> {
     let mut models = get_model_router().get_available_models();
-    
+
     // 按特定顺序排序
     let order = [
-        "qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash", "qwq-plus",
-        "calphamesh", "phase-field", "ml-server",
-        "ollama-qwen3-4b", "ollama-llama3", "coating"
+        "qwen-plus",
+        "qwen-turbo",
+        "qwen-max",
+        "qwen-flash",
+        "qwq-plus",
+        "calphamesh",
+        "phase-field",
+        "ml-server",
+        "ollama-qwen3-4b",
+        "ollama-llama3",
+        "coating",
     ];
 
-    models.sort_by_key(|name| {
-        order.iter().position(|&x| x == name).unwrap_or(usize::MAX)
-    });
+    models.sort_by_key(|name| order.iter().position(|&x| x == name).unwrap_or(usize::MAX));
 
     let response = serde_json::json!({
         "models": models.iter().map(|model| {

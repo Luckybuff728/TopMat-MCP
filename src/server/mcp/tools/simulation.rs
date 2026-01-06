@@ -2,10 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
 
-use rig::{
-    completion::ToolDefinition,
-    tool::Tool,
-};
+use rig::{completion::ToolDefinition, tool::Tool};
 
 #[derive(Debug)]
 pub struct SimulationToolError(pub String);
@@ -65,17 +62,16 @@ impl Tool for TopPhiSimulator {
         println!("  - 成分: {}", args.composition);
         println!("  - 工艺参数: {}", args.process_params);
         println!("  - 结构: {}", args.structure);
-        
-        let result = format!(
-            "TopPhi模拟结果:\n\
+
+        let result = "TopPhi模拟结果:\n\
             形貌特征: 柱状晶结构，晶粒尺寸约 50-80 nm\n\
             表面粗糙度: Ra = 0.15 μm\n\
             致密度: 98.5%\n\
             应力状态: 压应力 -2.3 GPa\n\
             界面结合: 良好，无明显缺陷\n\
             预测生长速率: 2.5 μm/h"
-        );
-        
+            .to_string();
+
         println!("  ✓ 模拟完成\n");
         Ok(result)
     }
@@ -124,13 +120,12 @@ impl Tool for MLPerformancePredictor {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let result = format!(
-            "ML模型预测结果:\n\
+        let result = "ML模型预测结果:\n\
             预测硬度: 3200 HV (置信度: 85%)\n\
             预测附着力: 68 N (置信度: 82%)\n\
             耐磨性指数: 良好 (置信度: 78%)\n\
             热稳定性: 750°C (置信度: 80%)"
-        );
+            .to_string();
         Ok(result)
     }
 }
@@ -175,14 +170,13 @@ impl Tool for HistoricalDataQuery {
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         println!("\n[历史数据查询] 检索相似案例...");
-        let result = format!(
-            "历史数据对比结果:\n\
+        let result = "历史数据对比结果:\n\
             相似案例数: 15个\n\
             平均硬度: 3150 HV\n\
             平均附着力: 65 N\n\
             当前方案预测值略高于历史平均值\n\
             建议: 提高Al含量可能提升性能"
-        );
+            .to_string();
         println!("  ✓ 查询完成\n");
         Ok(result)
     }

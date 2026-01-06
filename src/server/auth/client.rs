@@ -1,10 +1,10 @@
 use reqwest;
-use std::time::Duration;
-use tracing::{debug, info, warn, error};
 use sqlx::Row;
+use std::time::Duration;
+use tracing::{debug, error, info, warn};
 
-use crate::server::models::{ApiKeyInfo, AuthError, AuthResult, UserInfo};
 use crate::server::database::DatabaseConnection;
+use crate::server::models::{ApiKeyInfo, AuthError, AuthResult, UserInfo};
 
 /// 鉴权客户端
 #[derive(Clone)]
@@ -31,7 +31,11 @@ impl AuthClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self { client, api_url, database }
+        Self {
+            client,
+            api_url,
+            database,
+        }
     }
 
     /// 验证API Key（带本地缓存）
@@ -40,7 +44,10 @@ impl AuthClient {
 
         // 1. 首先检查本地缓存
         if let Ok(cached_result) = self.check_local_cache(api_key).await {
-            info!("使用本地缓存验证成功: 用户={}", cached_result.user_info.username);
+            info!(
+                "使用本地缓存验证成功: 用户={}",
+                cached_result.user_info.username
+            );
             return Ok(cached_result);
         }
 
@@ -90,7 +97,8 @@ impl AuthClient {
         };
 
         // 检查缓存是否过期（1小时）
-        let last_updated: chrono::DateTime<chrono::Utc> = row.try_get("updated_at")
+        let last_updated: chrono::DateTime<chrono::Utc> = row
+            .try_get("updated_at")
             .unwrap_or_else(|_| chrono::Utc::now());
 
         let one_hour_ago = chrono::Utc::now() - chrono::Duration::hours(1);
@@ -101,23 +109,27 @@ impl AuthClient {
         }
 
         // 检查API密钥是否过期
-        if let Some(expires_at_str) = row.try_get::<Option<String>, _>("expires_at").ok().flatten() {
-            if let Some(expires_at) = self.parse_datetime(&expires_at_str) {
-                if expires_at < chrono::Utc::now() {
-                    warn!("API密钥已过期: {}", expires_at);
-                    return Err(AuthError::ExpiredApiKey);
-                }
-            }
+        if let Some(expires_at_str) = row
+            .try_get::<Option<String>, _>("expires_at")
+            .ok()
+            .flatten()
+            && let Some(expires_at) = self.parse_datetime(&expires_at_str)
+            && expires_at < chrono::Utc::now()
+        {
+            warn!("API密钥已过期: {}", expires_at);
+            return Err(AuthError::ExpiredApiKey);
         }
 
         // 检查用户订阅是否过期
-        if let Some(subscription_expires_at_str) = row.try_get::<Option<String>, _>("subscription_expires_at").ok().flatten() {
-            if let Some(subscription_expires_at) = self.parse_datetime(&subscription_expires_at_str) {
-                if subscription_expires_at < chrono::Utc::now() {
-                    warn!("用户订阅已过期: {}", subscription_expires_at);
-                    return Err(AuthError::SubscriptionExpired);
-                }
-            }
+        if let Some(subscription_expires_at_str) = row
+            .try_get::<Option<String>, _>("subscription_expires_at")
+            .ok()
+            .flatten()
+            && let Some(subscription_expires_at) = self.parse_datetime(&subscription_expires_at_str)
+            && subscription_expires_at < chrono::Utc::now()
+        {
+            warn!("用户订阅已过期: {}", subscription_expires_at);
+            return Err(AuthError::SubscriptionExpired);
         }
 
         // 构建认证结果
@@ -131,14 +143,18 @@ impl AuthClient {
 
         let api_key_info = ApiKeyInfo {
             api_key: row.try_get("api_key").unwrap_or_default(),
-            created_at: row.try_get("created_at")
+            created_at: row
+                .try_get("created_at")
                 .unwrap_or_else(|_| chrono::Utc::now())
                 .to_rfc3339(),
             expires_at: row.try_get("expires_at").ok(),
             id: row.try_get::<i64, _>("id").unwrap_or(0) as u32,
             is_active: row.try_get("is_active").unwrap_or(false),
             key_name: row.try_get("key_name").unwrap_or_default(),
-            last_used_at: row.try_get::<Option<String>, _>("last_used_at").ok().flatten(),
+            last_used_at: row
+                .try_get::<Option<String>, _>("last_used_at")
+                .ok()
+                .flatten(),
             user: user_info.clone(),
         };
 
@@ -218,33 +234,33 @@ impl AuthClient {
         }
 
         // 检查API Key是否过期
-        if let Some(expires_at_str) = &api_key_info.expires_at {
-            if let Some(expires_at) = self.parse_datetime(expires_at_str) {
-                if expires_at < chrono::Utc::now() {
-                    warn!("API Key已过期: {} (过期时间: {})",
-                          api_key_info.key_name, expires_at_str);
-                    return Err(AuthError::ExpiredApiKey);
-                }
-            }
+        if let Some(expires_at_str) = &api_key_info.expires_at
+            && let Some(expires_at) = self.parse_datetime(expires_at_str)
+            && expires_at < chrono::Utc::now()
+        {
+            warn!(
+                "API Key已过期: {} (过期时间: {})",
+                api_key_info.key_name, expires_at_str
+            );
+            return Err(AuthError::ExpiredApiKey);
         }
 
         // 检查用户订阅是否过期
-        if let Some(sub_expires_at_str) = &api_key_info.user.subscription_expires_at {
-            if let Some(subscription_expires_at) = self.parse_datetime(sub_expires_at_str) {
-                if subscription_expires_at < chrono::Utc::now() {
-                    warn!("用户订阅已过期: {} (用户: {}, 过期时间: {})",
-                          api_key_info.key_name,
-                          api_key_info.user.username,
-                          sub_expires_at_str);
-                    return Err(AuthError::SubscriptionExpired);
-                }
-            }
+        if let Some(sub_expires_at_str) = &api_key_info.user.subscription_expires_at
+            && let Some(subscription_expires_at) = self.parse_datetime(sub_expires_at_str)
+            && subscription_expires_at < chrono::Utc::now()
+        {
+            warn!(
+                "用户订阅已过期: {} (用户: {}, 过期时间: {})",
+                api_key_info.key_name, api_key_info.user.username, sub_expires_at_str
+            );
+            return Err(AuthError::SubscriptionExpired);
         }
 
-        info!("API Key验证成功: {} (用户: {}, 订阅级别: {})",
-              api_key_info.key_name,
-              api_key_info.user.username,
-              api_key_info.user.subscription_level);
+        info!(
+            "API Key验证成功: {} (用户: {}, 订阅级别: {})",
+            api_key_info.key_name, api_key_info.user.username, api_key_info.user.subscription_level
+        );
 
         Ok(AuthResult {
             user_info: api_key_info.user.clone(),
@@ -253,7 +269,11 @@ impl AuthClient {
     }
 
     /// 保存认证结果到本地缓存
-    async fn save_to_cache(&self, auth_result: &AuthResult, api_key: &str) -> Result<(), sqlx::Error> {
+    async fn save_to_cache(
+        &self,
+        auth_result: &AuthResult,
+        api_key: &str,
+    ) -> Result<(), sqlx::Error> {
         let mut tx = self.database.pool().begin().await?;
 
         // 检查用户是否已存在
@@ -271,7 +291,7 @@ impl AuthClient {
                 .subscription_expires_at
                 .as_ref()
                 .and_then(|s| self.parse_datetime(s));
-            
+
             let update_sql = "
                 UPDATE users SET
                     email = $1,
@@ -298,7 +318,7 @@ impl AuthClient {
                 .subscription_expires_at
                 .as_ref()
                 .and_then(|s| self.parse_datetime(s));
-            
+
             let insert_sql = "
                 INSERT INTO users (username, email, subscription_level, subscription_expires_at, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6)
@@ -332,7 +352,7 @@ impl AuthClient {
                 .expires_at
                 .as_ref()
                 .and_then(|s| self.parse_datetime(s));
-            
+
             let update_key_sql = "
                 UPDATE api_keys SET
                     user_id = $1,
@@ -361,7 +381,7 @@ impl AuthClient {
                 .expires_at
                 .as_ref()
                 .and_then(|s| self.parse_datetime(s));
-            
+
             let insert_key_sql = "
                 INSERT INTO api_keys (user_id, api_key, key_name, is_active, expires_at, last_used_at, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -404,6 +424,7 @@ impl AuthClient {
     }
 
     /// 获取客户端配置信息
+    #[allow(dead_code)]
     pub fn get_config(&self) -> AuthClientConfig {
         AuthClientConfig {
             api_url: self.api_url.clone(),

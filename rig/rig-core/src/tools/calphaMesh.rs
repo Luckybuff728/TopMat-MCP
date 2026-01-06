@@ -3,17 +3,13 @@
 //! 提供与 Calpha Mesh API 交互的工具，用于提交材料计算任务和查询结果
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
-
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 
 use crate::{
     completion::ToolDefinition,
-    tool::{Tool, ToolError},
-    wasm_compat::WasmBoxedFuture,
+    tool::Tool,
 };
 
 // API 基础 URL

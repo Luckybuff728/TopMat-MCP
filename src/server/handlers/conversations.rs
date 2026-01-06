@@ -1,15 +1,13 @@
 use axum::{
-    extract::{Query, State, Path, Extension},
+    extract::{Extension, Path, Query, State},
     response::Json,
 };
-use tracing::{info, error};
 use sqlx::Row;
-use utoipa::path;
-use serde_json::json;
+use tracing::{error, info};
 
-use crate::server::models::*;
-use crate::server::middleware::AuthUser;
 use super::chat::ServerState;
+use crate::server::middleware::AuthUser;
+use crate::server::models::*;
 
 /// 获取用户对话列表
 #[utoipa::path(
@@ -39,8 +37,10 @@ pub async fn list_conversations_handler(
     State(state): State<ServerState>,
     Query(params): Query<ListConversationsQuery>,
 ) -> Result<Json<ConversationListResponse>, ErrorResponse> {
-    info!("获取对话列表: limit={}, offset={}, user_id={}",
-          params.limit, params.offset, auth_user.user_id);
+    info!(
+        "获取对话列表: limit={}, offset={}, user_id={}",
+        params.limit, params.offset, auth_user.user_id
+    );
 
     // 从认证信息中获取真实用户ID
     let user_id = auth_user.user_id as i64;
@@ -50,9 +50,18 @@ pub async fn list_conversations_handler(
          FROM conversations WHERE user_id = $1";
 
     let (sql, _param_offset) = if params.search.is_some() {
-        (format!("{} AND (title LIKE $2 OR summary LIKE $3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5", base_sql), 2)
+        (
+            format!(
+                "{} AND (title LIKE $2 OR summary LIKE $3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5",
+                base_sql
+            ),
+            2,
+        )
     } else {
-        (format!("{} ORDER BY updated_at DESC LIMIT $2 OFFSET $3", base_sql), 1)
+        (
+            format!("{} ORDER BY updated_at DESC LIMIT $2 OFFSET $3", base_sql),
+            1,
+        )
     };
 
     // 执行查询
@@ -67,34 +76,36 @@ pub async fn list_conversations_handler(
     query = query.bind(params.limit);
     query = query.bind(params.offset);
 
-    let rows = query
-        .fetch_all(state.database.pool())
-        .await
-        .map_err(|e| {
-            error!("查询对话列表失败: {}", e);
-            ErrorResponse {
-                error: "database_error".to_string(),
-                message: "查询对话列表失败".to_string(),
-                details: Some(serde_json::json!({
-                    "error": e.to_string()
-                })),
-                timestamp: chrono::Local::now(),
-            }
-        })?;
+    let rows = query.fetch_all(state.database.pool()).await.map_err(|e| {
+        error!("查询对话列表失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "查询对话列表失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Local::now(),
+        }
+    })?;
 
     // 转换为API模型
     let conversations: Vec<Conversation> = rows
         .into_iter()
         .map(|row| Conversation {
-            conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
+            conversation_id: Some(
+                row.try_get::<String, _>("conversation_id")
+                    .unwrap_or_default(),
+            ),
             user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
             title: row.try_get::<Option<String>, _>("title").ok().flatten(),
             model: row.try_get::<String, _>("model").unwrap_or_default(),
             message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
             summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-            created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+            created_at: row
+                .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
                 .unwrap_or_else(|_| chrono::Local::now()),
-            updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+            updated_at: row
+                .try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
                 .unwrap_or_else(|_| chrono::Local::now()),
         })
         .collect();
@@ -196,7 +207,7 @@ pub async fn create_conversation_handler(
         r#"
         INSERT INTO conversations (conversation_id, user_id, title, model, created_at, updated_at)
         VALUES ($1, $2, $3, $4, NOW(), NOW())
-        "#
+        "#,
     )
     .bind(&conversation_id)
     .bind(user_id)
@@ -223,7 +234,7 @@ pub async fn create_conversation_handler(
             INSERT INTO messages (conversation_id, role, content, model, created_at)
             VALUES ($1, $2, $3, $4, NOW())
             RETURNING message_id
-            "#
+            "#,
         )
         .bind(&conversation_id)
         .bind("user")
@@ -294,19 +305,27 @@ pub async fn create_conversation_handler(
     })?;
 
     let conversation = Conversation {
-        conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
+        conversation_id: Some(
+            row.try_get::<String, _>("conversation_id")
+                .unwrap_or_default(),
+        ),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
         message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
         summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+        created_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
             .unwrap_or_else(|_| chrono::Local::now()),
-        updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+        updated_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
             .unwrap_or_else(|_| chrono::Local::now()),
     };
 
-    info!("成功创建对话: conversation_id={}, title={:?}", conversation_id, request.title);
+    info!(
+        "成功创建对话: conversation_id={}, title={:?}",
+        conversation_id, request.title
+    );
 
     Ok(Json(CreateConversationResponse {
         conversation,
@@ -339,7 +358,10 @@ pub async fn get_conversation_handler(
     State(state): State<ServerState>,
     Path(conversation_id): Path<String>,
 ) -> Result<Json<Conversation>, ErrorResponse> {
-    info!("获取对话详情: conversation_id={}, user_id={}", conversation_id, auth_user.user_id);
+    info!(
+        "获取对话详情: conversation_id={}, user_id={}",
+        conversation_id, auth_user.user_id
+    );
 
     // 查询对话详情
     let row = sqlx::query(
@@ -377,15 +399,20 @@ pub async fn get_conversation_handler(
     })?;
 
     let conversation = Conversation {
-        conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
+        conversation_id: Some(
+            row.try_get::<String, _>("conversation_id")
+                .unwrap_or_default(),
+        ),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
         message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
         summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+        created_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
             .unwrap_or_else(|_| chrono::Local::now()),
-        updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+        updated_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
             .unwrap_or_else(|_| chrono::Local::now()),
     };
 
@@ -426,8 +453,10 @@ pub async fn update_conversation_title_handler(
     Path(conversation_id): Path<String>,
     Json(request): Json<UpdateConversationTitleRequest>,
 ) -> Result<Json<Conversation>, ErrorResponse> {
-    info!("更新对话标题: conversation_id={}, new_title={}, user_id={}",
-          conversation_id, request.title, auth_user.user_id);
+    info!(
+        "更新对话标题: conversation_id={}, new_title={}, user_id={}",
+        conversation_id, request.title, auth_user.user_id
+    );
 
     // 执行更新操作
     let result = sqlx::query(
@@ -435,7 +464,7 @@ pub async fn update_conversation_title_handler(
         UPDATE conversations
         SET title = $1, updated_at = NOW()
         WHERE conversation_id = $2 AND user_id = $3
-        "#
+        "#,
     )
     .bind(&request.title)
     .bind(&conversation_id)
@@ -500,19 +529,27 @@ pub async fn update_conversation_title_handler(
     })?;
 
     let conversation = Conversation {
-        conversation_id: Some(row.try_get::<String, _>("conversation_id").unwrap_or_default()),
+        conversation_id: Some(
+            row.try_get::<String, _>("conversation_id")
+                .unwrap_or_default(),
+        ),
         user_id: row.try_get::<i64, _>("user_id").unwrap_or(0) as i32,
         title: row.try_get::<Option<String>, _>("title").ok().flatten(),
         model: row.try_get::<String, _>("model").unwrap_or_default(),
         message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
         summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
-        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+        created_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
             .unwrap_or_else(|_| chrono::Local::now()),
-        updated_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+        updated_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
             .unwrap_or_else(|_| chrono::Local::now()),
     };
 
-    info!("成功更新对话标题: conversation_id={}, title={:?}", conversation_id, request.title);
+    info!(
+        "成功更新对话标题: conversation_id={}, title={:?}",
+        conversation_id, request.title
+    );
 
     Ok(Json(conversation))
 }
@@ -549,7 +586,10 @@ pub async fn delete_conversation_handler(
     State(state): State<ServerState>,
     Path(conversation_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
-    info!("删除对话: conversation_id={}, user_id={}", conversation_id, auth_user.user_id);
+    info!(
+        "删除对话: conversation_id={}, user_id={}",
+        conversation_id, auth_user.user_id
+    );
 
     // 开始事务进行级联删除
     let mut tx = state.database.pool().begin().await.map_err(|e| {
@@ -565,43 +605,40 @@ pub async fn delete_conversation_handler(
     })?;
 
     // 首先删除该对话的所有消息
-    let delete_messages_result = sqlx::query(
-        "DELETE FROM messages WHERE conversation_id = $1"
-    )
-    .bind(&conversation_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        error!("删除对话消息失败: {}", e);
-        ErrorResponse {
-            error: "database_error".to_string(),
-            message: "删除对话消息失败".to_string(),
-            details: Some(serde_json::json!({
-                "error": e.to_string()
-            })),
-            timestamp: chrono::Local::now(),
-        }
-    })?;
+    let delete_messages_result = sqlx::query("DELETE FROM messages WHERE conversation_id = $1")
+        .bind(&conversation_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            error!("删除对话消息失败: {}", e);
+            ErrorResponse {
+                error: "database_error".to_string(),
+                message: "删除对话消息失败".to_string(),
+                details: Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+                timestamp: chrono::Local::now(),
+            }
+        })?;
 
     // 删除对话本身
-    let delete_conversation_result = sqlx::query(
-        "DELETE FROM conversations WHERE conversation_id = $1 AND user_id = $2"
-    )
-    .bind(&conversation_id)
-    .bind(auth_user.user_id as i64)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        error!("删除对话失败: {}", e);
-        ErrorResponse {
-            error: "database_error".to_string(),
-            message: "删除对话失败".to_string(),
-            details: Some(serde_json::json!({
-                "error": e.to_string()
-            })),
-            timestamp: chrono::Local::now(),
-        }
-    })?;
+    let delete_conversation_result =
+        sqlx::query("DELETE FROM conversations WHERE conversation_id = $1 AND user_id = $2")
+            .bind(&conversation_id)
+            .bind(auth_user.user_id as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                error!("删除对话失败: {}", e);
+                ErrorResponse {
+                    error: "database_error".to_string(),
+                    message: "删除对话失败".to_string(),
+                    details: Some(serde_json::json!({
+                        "error": e.to_string()
+                    })),
+                    timestamp: chrono::Local::now(),
+                }
+            })?;
 
     // 提交事务
     tx.commit().await.map_err(|e| {
@@ -628,8 +665,10 @@ pub async fn delete_conversation_handler(
     }
 
     let deleted_messages_count = delete_messages_result.rows_affected();
-    info!("成功删除对话: conversation_id={}, deleted_messages={}, user_id={}",
-          conversation_id, deleted_messages_count, auth_user.user_id);
+    info!(
+        "成功删除对话: conversation_id={}, deleted_messages={}, user_id={}",
+        conversation_id, deleted_messages_count, auth_user.user_id
+    );
 
     Ok(Json(serde_json::json!({
         "success": true,

@@ -3,18 +3,12 @@
 //! 提供与 Calpha Mesh API 交互的工具，用于提交材料计算任务和查询结果
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
 
-use rig::{
-    completion::ToolDefinition,
-    tool::{Tool, ToolError},
-    wasm_compat::WasmBoxedFuture,
-};
+use rig::{completion::ToolDefinition, tool::Tool};
 
 // API 基础 URL
 const API_BASE_URL: &str = "https://api.topmaterial-tech.com";
@@ -198,22 +192,43 @@ fn default_composition() -> HashMap<String, f64> {
     comp
 }
 
-fn default_temperature() -> f64 { 298.15 }
-fn default_end_temperature() -> f64 { 1000.0 }
-fn default_scheil_temperature() -> f64 { 1073.15 }
-fn default_pressure() -> f64 { 1.0 }
-fn default_scheil_pressure() -> f64 { 1.01325 }
-fn default_steps() -> i64 { 50 }
-fn default_database() -> String { "default".to_string() }
-fn default_page() -> i32 { 1 }
-fn default_items_per_page() -> i32 { 50 }
+fn default_temperature() -> f64 {
+    298.15
+}
+fn default_end_temperature() -> f64 {
+    1000.0
+}
+fn default_scheil_temperature() -> f64 {
+    1073.15
+}
+fn default_pressure() -> f64 {
+    1.0
+}
+fn default_scheil_pressure() -> f64 {
+    1.01325
+}
+fn default_steps() -> i64 {
+    50
+}
+fn default_database() -> String {
+    "default".to_string()
+}
+fn default_page() -> i32 {
+    1
+}
+fn default_items_per_page() -> i32 {
+    50
+}
 
 /// 验证组分之和是否等于1（允许微小误差），返回错误信息
 fn validate_composition_sum(composition: &HashMap<String, f64>) -> Option<String> {
     let sum: f64 = composition.values().sum();
     const TOLERANCE: f64 = 1e-6;
     if (sum - 1.0).abs() > TOLERANCE {
-        return Some(format!("组分之和必须为1，当前总和为 {:.6}，请调整组分值后重试", sum));
+        return Some(format!(
+            "组分之和必须为1，当前总和为 {:.6}，请调整组分值后重试",
+            sum
+        ));
     }
     None
 }
@@ -234,7 +249,8 @@ impl CalphaMeshClient {
     }
 
     async fn make_request(&self, url: &str, body: String) -> Result<String, CalphaMeshError> {
-        let response = self.client
+        let response = self
+            .client
             .post(url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -244,7 +260,9 @@ impl CalphaMeshClient {
             .map_err(|e| CalphaMeshError::HttpError(e.to_string()))?;
 
         let status = response.status().as_u16();
-        let response_text = response.text().await
+        let response_text = response
+            .text()
+            .await
             .map_err(|e| CalphaMeshError::HttpError(e.to_string()))?;
 
         if status == 200 || status == 201 {
@@ -257,7 +275,10 @@ impl CalphaMeshClient {
         }
     }
 
-    pub async fn submit_point_task(&self, params: PointTaskParams) -> Result<TaskResponse, CalphaMeshError> {
+    pub async fn submit_point_task(
+        &self,
+        params: PointTaskParams,
+    ) -> Result<TaskResponse, CalphaMeshError> {
         let task_description = json!({
             "task_type": "point",
             "components": params.components,
@@ -288,13 +309,18 @@ impl CalphaMeshClient {
         };
 
         let url = format!("{}/api/v1/create_task", API_BASE_URL);
-        let response_text = self.make_request(&url, serde_json::to_string(&create_body)?).await?;
+        let response_text = self
+            .make_request(&url, serde_json::to_string(&create_body)?)
+            .await?;
         let task_response: TaskResponse = serde_json::from_str(&response_text)?;
 
         Ok(task_response)
     }
 
-    pub async fn submit_line_task(&self, params: LineTaskParams) -> Result<TaskResponse, CalphaMeshError> {
+    pub async fn submit_line_task(
+        &self,
+        params: LineTaskParams,
+    ) -> Result<TaskResponse, CalphaMeshError> {
         let task_description = json!({
             "task_type": "line",
             "components": params.components,
@@ -332,13 +358,18 @@ impl CalphaMeshClient {
         };
 
         let url = format!("{}/api/v1/create_task", API_BASE_URL);
-        let response_text = self.make_request(&url, serde_json::to_string(&create_body)?).await?;
+        let response_text = self
+            .make_request(&url, serde_json::to_string(&create_body)?)
+            .await?;
         let task_response: TaskResponse = serde_json::from_str(&response_text)?;
 
         Ok(task_response)
     }
 
-    pub async fn submit_scheil_task(&self, params: ScheilTaskParams) -> Result<TaskResponse, CalphaMeshError> {
+    pub async fn submit_scheil_task(
+        &self,
+        params: ScheilTaskParams,
+    ) -> Result<TaskResponse, CalphaMeshError> {
         let task_description = json!({
             "task_type": "scheil",
             "components": params.components,
@@ -375,29 +406,45 @@ impl CalphaMeshClient {
         };
 
         let url = format!("{}/api/v1/create_task", API_BASE_URL);
-        let response_text = self.make_request(&url, serde_json::to_string(&create_body)?).await?;
+        let response_text = self
+            .make_request(&url, serde_json::to_string(&create_body)?)
+            .await?;
         let task_response: TaskResponse = serde_json::from_str(&response_text)?;
 
         Ok(task_response)
     }
 
-    pub async fn get_task_status(&self, task_id: i32) -> Result<TaskStatusResponse, CalphaMeshError> {
+    pub async fn get_task_status(
+        &self,
+        task_id: i32,
+    ) -> Result<TaskStatusResponse, CalphaMeshError> {
         if task_id <= 0 {
             return Err(CalphaMeshError::InvalidTaskId(task_id));
         }
 
         let get_task_body = GetTaskApiKeyRequest { id: task_id };
         let url = format!("{}/api/v1/get_task", API_BASE_URL);
-        let response_text = self.make_request(&url, serde_json::to_string(&get_task_body)?).await?;
+        let response_text = self
+            .make_request(&url, serde_json::to_string(&get_task_body)?)
+            .await?;
         let task: TaskStatusResponse = serde_json::from_str(&response_text)?;
 
         Ok(task)
     }
 
-    pub async fn list_tasks(&self, page: i32, items_per_page: i32) -> Result<TaskListResponse, CalphaMeshError> {
-        let get_tasks_body = GetTasksApiKeyRequest { page, items_per_page };
+    pub async fn list_tasks(
+        &self,
+        page: i32,
+        items_per_page: i32,
+    ) -> Result<TaskListResponse, CalphaMeshError> {
+        let get_tasks_body = GetTasksApiKeyRequest {
+            page,
+            items_per_page,
+        };
         let url = format!("{}/api/v1/get_tasks", API_BASE_URL);
-        let response_text = self.make_request(&url, serde_json::to_string(&get_tasks_body)?).await?;
+        let response_text = self
+            .make_request(&url, serde_json::to_string(&get_tasks_body)?)
+            .await?;
         let list: TaskListResponse = serde_json::from_str(&response_text)?;
 
         Ok(list)
@@ -671,7 +718,13 @@ impl Tool for GetTaskStatus {
 
         let mut result = format!(
             "任务状态\nID: {}\n标题: {}\n类型: {}\n状态: {}\n用户ID: {}\n创建: {}\n更新: {}",
-            task.id, task.title, task.task_type, task.status, task.user_id, task.created_at, task.updated_at
+            task.id,
+            task.title,
+            task.task_type,
+            task.status,
+            task.user_id,
+            task.created_at,
+            task.updated_at
         );
 
         if let Some(result_data) = &task.result {
@@ -738,7 +791,11 @@ impl Tool for ListTasks {
             for (idx, task) in list.data.iter().enumerate() {
                 result.push_str(&format!(
                     "{}. [{}] {} | {} | {}\n",
-                    idx + 1, task.status, task.id, task.task_type, task.title
+                    idx + 1,
+                    task.status,
+                    task.id,
+                    task.task_type,
+                    task.title
                 ));
             }
         }

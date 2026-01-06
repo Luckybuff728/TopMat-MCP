@@ -4,18 +4,17 @@ use axum::{
     response::Json,
 };
 use chrono::TimeZone;
-use std::collections::HashMap;
 use futures_util::future::join_all;
-use tracing::{info, error};
 use sqlx::Row;
-use utoipa::path;
+use std::collections::HashMap;
+use tracing::{error, info};
 
-use crate::server::models::{
-    DetailedUsageStats, ErrorResponse, HealthCheckResponse, ServiceStatus,
-    ServicesStatus, UsageStats, UsageStatsQuery, UsageStatsResponse,
-};
-use crate::server::database::connection::get_default_database_url;
 use super::chat::ServerState;
+use crate::server::database::connection::get_default_database_url;
+use crate::server::models::{
+    DetailedUsageStats, ErrorResponse, HealthCheckResponse, ServiceStatus, ServicesStatus,
+    UsageStats, UsageStatsQuery, UsageStatsResponse,
+};
 
 /// 获取用户使用统计
 #[utoipa::path(
@@ -43,27 +42,35 @@ pub async fn get_usage_stats_handler(
     State(state): State<ServerState>,
     Query(params): Query<UsageStatsQuery>,
 ) -> Result<Json<UsageStatsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    info!("获取使用统计: period={:?}, from_date={:?}, to_date={:?}",
-          params.period, params.from_date, params.to_date);
+    info!(
+        "获取使用统计: period={:?}, from_date={:?}, to_date={:?}",
+        params.period, params.from_date, params.to_date
+    );
 
     // 解析日期参数，设置默认值
-    let from_date_local = params.from_date.and_then(|s| {
-        chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
-            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
-            .ok()
-            .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
-    }).unwrap_or_else(|| {
-        chrono::Local::now()
-            .checked_sub_signed(chrono::Duration::days(30))
-            .unwrap_or_else(|| chrono::Local::now())
-    });
+    let from_date_local = params
+        .from_date
+        .and_then(|s| {
+            chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
+                .or_else(|_| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+                .ok()
+                .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+        })
+        .unwrap_or_else(|| {
+            chrono::Local::now()
+                .checked_sub_signed(chrono::Duration::days(30))
+                .unwrap_or_else(chrono::Local::now)
+        });
 
-    let to_date_local = params.to_date.and_then(|s| {
-        chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
-            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
-            .ok()
-            .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
-    }).unwrap_or_else(|| chrono::Local::now());
+    let to_date_local = params
+        .to_date
+        .and_then(|s| {
+            chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
+                .or_else(|_| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S"))
+                .ok()
+                .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+        })
+        .unwrap_or_else(chrono::Local::now);
 
     // 转换为 UTC 以便查询数据库
     let from_date_utc = from_date_local.with_timezone(&chrono::Utc);
@@ -100,7 +107,7 @@ pub async fn get_usage_stats_handler(
                         "error": e.to_string()
                     })),
                     timestamp: chrono::Local::now(),
-                })
+                }),
             )
         })?;
 
@@ -156,10 +163,14 @@ pub async fn get_usage_stats_handler(
                         "error": e.to_string()
                     })),
                     timestamp: chrono::Local::now(),
-                })
+                }),
             )
         })?
-        .and_then(|row| row.try_get::<Option<f64>, _>("avg_response_time").ok().flatten())
+        .and_then(|row| {
+            row.try_get::<Option<f64>, _>("avg_response_time")
+                .ok()
+                .flatten()
+        })
         .unwrap_or(1250.0); // 默认值
 
     let detailed_stats = DetailedUsageStats {
@@ -203,9 +214,14 @@ pub async fn health_check_handler() -> Json<HealthCheckResponse> {
     let cache_status = check_cache_health().await;
 
     // 检查各AI模型状态
-    let models_to_check = vec![
-        "qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash", "qwq-plus",
-        "ollama-qwen3-4b", "ollama-llama3"
+    let models_to_check = [
+        "qwen-plus",
+        "qwen-turbo",
+        "qwen-max",
+        "qwen-flash",
+        "qwq-plus",
+        "ollama-qwen3-4b",
+        "ollama-llama3",
     ];
 
     let mut ai_models = HashMap::new();
@@ -237,23 +253,14 @@ pub async fn health_check_handler() -> Json<HealthCheckResponse> {
     let overall_status = match database_config_status {
         ServiceStatus::Healthy => {
             // 如果数据库健康，检查其他组件
-            let unhealthy_components = services.ai_models.values()
-                .filter(|s| matches!(s, ServiceStatus::Unhealthy))
-                .count();
-
-            if unhealthy_components > 0 {
-                ServiceStatus::Healthy // 部分功能不可用，但服务整体可用
-            } else {
-                ServiceStatus::Healthy
-            }
+            ServiceStatus::Healthy
         }
         ServiceStatus::Unhealthy => ServiceStatus::Unhealthy,
         ServiceStatus::Unknown => ServiceStatus::Unknown,
     };
 
     // 获取版本号，优先从环境变量读取，否则使用默认值
-    let version = std::env::var("APP_VERSION")
-        .unwrap_or_else(|_| "1.3.0".to_string());
+    let version = std::env::var("APP_VERSION").unwrap_or_else(|_| "1.3.0".to_string());
 
     let response = HealthCheckResponse {
         status: overall_status,
@@ -329,7 +336,7 @@ async fn check_ollama_service_health() -> Result<(), Box<dyn std::error::Error>>
     // 简化实现：检查是否可以连接到Ollama API
     // 在实际环境中，可以使用reqwest或tokio的TcpStream来检查
     match std::env::var("OLLAMA_BASE_URL") {
-        Ok(_) => Ok(()), // 如果配置了Ollama URL，认为服务可用
+        Ok(_) => Ok(()),  // 如果配置了Ollama URL，认为服务可用
         Err(_) => Ok(()), // 即使没有配置，也返回Ok，表示可选服务
     }
 }
@@ -340,17 +347,21 @@ async fn check_database_config() -> ServiceStatus {
     match std::env::var("DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => {
             // 验证数据库URL格式 (PostgreSQL)
-            if database_url.starts_with("postgresql://") || database_url.starts_with("postgres://") {
+            if database_url.starts_with("postgresql://") || database_url.starts_with("postgres://")
+            {
                 tracing::info!("检测到PostgreSQL数据库配置: {}", database_url);
                 ServiceStatus::Healthy
             } else {
-                tracing::error!("不支持的数据库类型，请使用 postgresql:// 连接串: {}", database_url);
+                tracing::error!(
+                    "不支持的数据库类型，请使用 postgresql:// 连接串: {}",
+                    database_url
+                );
                 ServiceStatus::Unhealthy
             }
         }
         Ok(_) | Err(_) => {
             // 使用默认的PostgreSQL数据库配置
-            let default_url = get_default_database_url();
+            let _default_url = get_default_database_url();
             tracing::info!("使用默认数据库配置");
             ServiceStatus::Healthy
         }

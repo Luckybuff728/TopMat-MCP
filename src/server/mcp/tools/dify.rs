@@ -2,14 +2,11 @@
 //!
 //! 提供与 Dify API 集成的工具，支持钢铁知识库、硬质合金知识库查询以及 Al 合金正向设计-IDME
 
+use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use rig::{
-    completion::ToolDefinition,
-    tool::Tool,
-};
 
 use reqwest;
 
@@ -127,7 +124,12 @@ impl Tool for SteelRagQuery {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let api_key = "app-nzguJbMslrsTFV7HXefcilK6"; // 钢铁知识库 API Key
-        call_dify_workflow(api_key, args.input, args.user.unwrap_or_else(|| "default-user".to_string())).await
+        call_dify_workflow(
+            api_key,
+            args.input,
+            args.user.unwrap_or_else(|| "default-user".to_string()),
+        )
+        .await
     }
 }
 
@@ -171,7 +173,12 @@ impl Tool for CementedCarbideRagQuery {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let api_key = "app-c4PnkeaIM2pWLBzVelQtt0oy"; // 硬质合金知识库 API Key
-        call_dify_workflow(api_key, args.input, args.user.unwrap_or_else(|| "default-user".to_string())).await
+        call_dify_workflow(
+            api_key,
+            args.input,
+            args.user.unwrap_or_else(|| "default-user".to_string()),
+        )
+        .await
     }
 }
 
@@ -194,7 +201,9 @@ impl Tool for AlIdmeWorkflow {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "Al_idme_workflow".to_string(),
-            description: "Al合金正向设计-IDME: 提供铝合金的成分和工艺，用于Al合金的组织结构以及性能预测".to_string(),
+            description:
+                "Al合金正向设计-IDME: 提供铝合金的成分和工艺，用于Al合金的组织结构以及性能预测"
+                    .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -215,7 +224,12 @@ impl Tool for AlIdmeWorkflow {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let api_key = "app-Vjb2R86PqSCNR6S5w1TUc7a9"; // Al_IDME API Key
-        call_dify_workflow_demand(api_key, args.input, args.user.unwrap_or_else(|| "default-user".to_string())).await
+        call_dify_workflow_demand(
+            api_key,
+            args.input,
+            args.user.unwrap_or_else(|| "default-user".to_string()),
+        )
+        .await
     }
 }
 
@@ -329,8 +343,7 @@ fn handle_streaming_response(response: &str) -> Result<String, DifyError> {
     let mut text_chunks = Vec::new();
 
     for line in lines {
-        if line.starts_with("data: ") {
-            let data = &line[6..];
+        if let Some(data) = line.strip_prefix("data: ") {
             if data == "[DONE]" {
                 break;
             }
@@ -339,10 +352,10 @@ fn handle_streaming_response(response: &str) -> Result<String, DifyError> {
             if let Ok(json_data) = serde_json::from_str::<DifyStreamResponse>(data) {
                 match json_data.event.as_str() {
                     "text_chunk" => {
-                        if let Some(response_data) = json_data.response_data {
-                            if let Some(text) = response_data.text {
-                                text_chunks.push(text);
-                            }
+                        if let Some(response_data) = json_data.response_data
+                            && let Some(text) = response_data.text
+                        {
+                            text_chunks.push(text);
                         }
                     }
                     "workflow_finished" => {
@@ -363,46 +376,50 @@ fn handle_streaming_response(response: &str) -> Result<String, DifyError> {
     let combined_text = text_chunks.join("");
 
     if combined_text.is_empty() {
-        return Err(DifyError::InvalidRequest("No response content received".to_string()));
+        return Err(DifyError::InvalidRequest(
+            "No response content received".to_string(),
+        ));
     }
 
     Ok(combined_text)
 }
 
-/// 处理 Dify 阻塞响应（备用函数）
-fn handle_blocking_response(response: &str) -> Result<String, DifyError> {
-    if let Ok(json_response) = serde_json::from_str::<serde_json::Value>(response) {
-        // 检查是否有错误
-        if let Some(_error) = json_response.get("error") {
-            let error_msg = json_response
-                .get("error")
-                .and_then(|e| e.as_str())
-                .unwrap_or("Unknown error");
-            return Err(DifyError::ApiError {
-                status: 400,
-                message: error_msg.to_string(),
-            });
-        }
+// /// 处理 Dify 阻塞响应（备用函数）
+// fn handle_blocking_response(response: &str) -> Result<String, DifyError> {
+//     if let Ok(json_response) = serde_json::from_str::<serde_json::Value>(response) {
+//         // 检查是否有错误
+//         if let Some(_error) = json_response.get("error") {
+//             let error_msg = json_response
+//                 .get("error")
+//                 .and_then(|e| e.as_str())
+//                 .unwrap_or("Unknown error");
+//             return Err(DifyError::ApiError {
+//                 status: 400,
+//                 message: error_msg.to_string(),
+//             });
+//         }
 
-        // 提取输出内容
-        let output_text = json_response
-            .get("data")
-            .and_then(|d| d.get("outputs"))
-            .and_then(|o| o.as_object())
-            .and_then(|obj| {
-                // 尝试获取常见的输出字段
-                obj.get("text")
-                    .or_else(|| obj.get("output"))
-                    .or_else(|| obj.get("result"))
-                    .or_else(|| obj.get("answer"))
-            })
-            .and_then(|v| v.as_str())
-            .unwrap_or("No output found");
+//         // 提取输出内容
+//         let output_text = json_response
+//             .get("data")
+//             .and_then(|d| d.get("outputs"))
+//             .and_then(|o| o.as_object())
+//             .and_then(|obj| {
+//                 // 尝试获取常见的输出字段
+//                 obj.get("text")
+//                     .or_else(|| obj.get("output"))
+//                     .or_else(|| obj.get("result"))
+//                     .or_else(|| obj.get("answer"))
+//             })
+//             .and_then(|v| v.as_str())
+//             .unwrap_or("No output found");
 
-        Ok(output_text.to_string())
-    } else {
-        // 如果 JSON 解析失败，返回原始响应
-        Err(DifyError::JsonError(format!("Failed to parse response: {}", response)))
-    }
-}
-
+//         Ok(output_text.to_string())
+//     } else {
+//         // 如果 JSON 解析失败，返回原始响应
+//         Err(DifyError::JsonError(format!(
+//             "Failed to parse response: {}",
+//             response
+//         )))
+//     }
+// }

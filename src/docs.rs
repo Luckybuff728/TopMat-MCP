@@ -3,8 +3,8 @@
 //! 此模块定义了 TopMat-LLM 服务的 OpenAPI 3.0 规范，
 //! 用于生成交互式 API 文档。
 
-use utoipa::{OpenApi, ToSchema, Modify};
-use utoipa::openapi::{security::{SecurityScheme, HttpAuthScheme, SecurityRequirement, HttpBuilder}, path::PathItem};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme};
+use utoipa::{Modify, OpenApi};
 
 // 重新导出 OpenAPI 模型
 pub use crate::server::models::*;
@@ -103,7 +103,6 @@ pub use crate::server::models::*;
         (name = "conversations", description = "对话管理相关接口"),
         (name = "mcp", description = "MCP 工具相关接口"),
         (name = "usage", description = "使用统计相关接口")
-        
     ),
     modifiers(&BearerTokenSecurityAddon)
 )]
@@ -127,12 +126,8 @@ impl Modify for BearerTokenSecurityAddon {
         );
 
         // 定义不需要认证的路径
-        let public_paths = [
-            "/health",
-            "/v1/models",
-        ];
+        let public_paths = ["/health", "/v1/models"];
 
-        
         let bearer_security_req = SecurityRequirement::new("bearerAuth", Vec::<String>::new());
 
         // 为所有路径应用安全要求，除了公开路径外都需要认证
@@ -140,7 +135,9 @@ impl Modify for BearerTokenSecurityAddon {
             let path_str = path.as_str();
 
             // 检查路径是否为公开路径（不需要认证）
-            let is_public = public_paths.iter().any(|&public_path| path_str.contains(public_path));
+            let is_public = public_paths
+                .iter()
+                .any(|&public_path| path_str.contains(public_path));
 
             // 如果不是公开路径，则需要认证
             if !is_public {
@@ -173,4 +170,3 @@ impl Modify for BearerTokenSecurityAddon {
         }
     }
 }
-

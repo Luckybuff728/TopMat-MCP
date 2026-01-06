@@ -1,11 +1,9 @@
-use axum::{extract::{Json, State, Extension}};
+use axum::extract::{Extension, Json, State};
 use tracing::info;
-use utoipa::path;
-use serde_json::json;
 
-use crate::server::models::*;
 use crate::server::database::DatabaseConnection;
 use crate::server::middleware::auth::AuthUser;
+use crate::server::models::*;
 
 /// 服务器状态
 #[derive(Clone)]
@@ -23,7 +21,10 @@ impl ServerState {
         let auth_client = crate::server::auth::AuthClient::new(auth_api_url, database.clone());
         info!("鉴权客户端已初始化");
 
-        Self { database, auth_client }
+        Self {
+            database,
+            auth_client,
+        }
     }
 }
 
@@ -84,10 +85,12 @@ impl ServerState {
 )]
 pub async fn chat_handler(
     Extension(auth_user): Extension<AuthUser>,
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     Json(request): Json<ChatRequest>,
 ) -> Result<axum::response::Response, ErrorResponse> {
-    let conversation_id = request.conversation_id.as_ref()
+    let conversation_id = request
+        .conversation_id
+        .as_ref()
         .expect("conversation_id should be set by MessageStorage middleware");
 
     info!(

@@ -528,3 +528,5 @@ curl -X GET http://localhost:3000/usage/comprehensive \
 ---
 
 **TopMat-LLM** - 用 Rust 构建材料科学 AI 的未来。🦀✨
+
+docker run -p 8000:8000 -e DATABASE_URI=postgresql://llm:dckj%40zndx@139.159.198.14:5432/llm crystaldba/postgres-mcp --access-mode=unrestricted --transport=sse

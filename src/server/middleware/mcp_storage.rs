@@ -3,49 +3,47 @@
 //! 负责记录MCP工具调用和会话信息，支持HTTP和SSE传输
 
 use axum::{
+    body::Body,
     extract::{Request, State},
-    http::{Method, StatusCode},
+    http::Method,
     middleware::Next,
-    response::{IntoResponse, Response},
-    Extension, body::Body,
+    response::Response,
 };
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use sqlx::Row;
-use tracing::{info, error, debug, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::server::{
-    database::DatabaseConnection,
-    handlers::chat::ServerState,
-    middleware::auth::AuthUser,
+    database::DatabaseConnection, handlers::chat::ServerState, middleware::auth::AuthUser,
     models::ErrorResponse,
 };
 
 // 本地定义MCP相关数据结构，避免依赖models模块
 /// 创建MCP会话请求
-#[derive(Debug)]
-pub struct CreateMcpSessionRequest {
-    pub session_id: String,
-    pub user_id: i64,
-    pub transport_type: String,
-    pub client_info: Option<Value>,
-}
+// #[derive(Debug)]
+// pub struct CreateMcpSessionRequest {
+//     pub session_id: String,
+//     pub user_id: i64,
+//     pub transport_type: String,
+//     pub client_info: Option<Value>,
+// }
 
 /// 创建MCP工具调用请求
-#[derive(Debug)]
-pub struct CreateMcpToolCallRequest {
-    pub user_id: i64,
-    pub session_id: Option<String>,
-    pub tool_name: String,
-    pub request_arguments: Option<String>,
-    pub response_result: Option<String>,
-    pub execution_time_ms: Option<i32>,
-    pub status: String,
-    pub error_message: Option<String>,
-    pub transport_type: String,
-    pub endpoint: String,
-}
+// #[derive(Debug)]
+// pub struct CreateMcpToolCallRequest {
+//     pub user_id: i64,
+//     pub session_id: Option<String>,
+//     pub tool_name: String,
+//     pub request_arguments: Option<String>,
+//     pub response_result: Option<String>,
+//     pub execution_time_ms: Option<i32>,
+//     pub status: String,
+//     pub error_message: Option<String>,
+//     pub transport_type: String,
+//     pub endpoint: String,
+// }
 
 /// MCP数据存储中间件
 pub struct McpStorage;
@@ -102,7 +100,9 @@ impl McpStorage {
                 &state.database,
                 &context,
                 Some(extract_client_info(&request)),
-            ).await {
+            )
+            .await
+            {
                 error!("Failed to upsert MCP session: {}", e);
             }
 
@@ -136,7 +136,10 @@ impl McpStorage {
 
             // 尝试解析MCP请求
             if let Ok(mcp_request) = serde_json::from_slice::<Value>(&bytes) {
-                debug!("McpStorage: 解析到MCP请求: {}", serde_json::to_string_pretty(&mcp_request).unwrap_or_default());
+                debug!(
+                    "McpStorage: 解析到MCP请求: {}",
+                    serde_json::to_string_pretty(&mcp_request).unwrap_or_default()
+                );
 
                 // 重建请求并传递给下一个处理器
                 let response = {
@@ -150,24 +153,21 @@ impl McpStorage {
                 // 如果是工具调用且有会话上下文，记录调用结果
                 if let (Some(method_name), Some(ref context)) = (
                     mcp_request.get("method").and_then(|m| m.as_str()),
-                    session_context
-                ) {
-                    if method_name == "tools/call" {
-                        // 记录工具调用请求
-                        Self::record_tool_call_request(
-                            &state.database,
-                            context,
-                            &mcp_request,
-                        ).await;
+                    session_context,
+                ) && method_name == "tools/call"
+                {
+                    // 记录工具调用请求
+                    let _ = Self::record_tool_call_request(&state.database, context, &mcp_request)
+                        .await;
 
-                        // 尝试从响应中提取结果并记录
-                        return Self::handle_tool_call_response(
-                            response,
-                            &state.database,
-                            context,
-                            &mcp_request,
-                        ).await;
-                    }
+                    // 尝试从响应中提取结果并记录
+                    return Self::handle_tool_call_response(
+                        response,
+                        &state.database,
+                        context,
+                        &mcp_request,
+                    )
+                    .await;
                 }
 
                 return Ok(response);
@@ -198,7 +198,7 @@ impl McpStorage {
             ON CONFLICT (session_id) DO UPDATE SET
                 last_activity_at = NOW(),
                 client_info = EXCLUDED.client_info
-            "#
+            "#,
         )
         .bind(&context.session_id)
         .bind(context.user_id)
@@ -217,14 +217,15 @@ impl McpStorage {
         context: &McpSessionContext,
         mcp_request: &Value,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(params) = mcp_request.get("params") {
-            if let (Some(tool_name), Some(arguments)) = (
+        if let Some(params) = mcp_request.get("params")
+            && let (Some(tool_name), Some(arguments)) = (
                 params.get("name").and_then(|n| n.as_str()),
-                params.get("arguments")
-            ) {
-                let arguments_json = serde_json::to_string(arguments).ok();
+                params.get("arguments"),
+            )
+        {
+            let arguments_json = serde_json::to_string(arguments).ok();
 
-                let result = sqlx::query(
+            let result = sqlx::query(
                     r#"
                     INSERT INTO mcp_tool_calls
                     (user_id, session_id, tool_name, request_arguments, status, transport_type, endpoint)
@@ -241,17 +242,19 @@ impl McpStorage {
                 .fetch_one(db.pool())
                 .await?;
 
-                let row_id: i64 = result.try_get("id").unwrap_or(0);
-                info!("McpStorage: 已记录工具调用请求: {} (session: {}, id: {})", tool_name, context.session_id, row_id);
-                return Ok(Some(row_id));
-            }
+            let row_id: i64 = result.try_get("id").unwrap_or(0);
+            info!(
+                "McpStorage: 已记录工具调用请求: {} (session: {}, id: {})",
+                tool_name, context.session_id, row_id
+            );
+            return Ok(Some(row_id));
         }
         Ok(None)
     }
 
     /// 处理工具调用响应并记录结果
     async fn handle_tool_call_response(
-        mut response: Response,
+        response: Response,
         db: &DatabaseConnection,
         context: &McpSessionContext,
         original_request: &Value,
@@ -264,7 +267,7 @@ impl McpStorage {
                 .and_then(|p| p.get("name"))
                 .and_then(|n| n.as_str())
             {
-                Self::record_tool_call_result(
+                let _ = Self::record_tool_call_result(
                     db,
                     context,
                     tool_name,
@@ -272,7 +275,8 @@ impl McpStorage {
                     None,
                     "error",
                     Some(&format!("HTTP错误: {}", response.status())),
-                ).await;
+                )
+                .await;
             }
             return Ok(response);
         }
@@ -312,16 +316,13 @@ impl McpStorage {
         // 解析MCP响应
         match serde_json::from_slice::<Value>(&json_bytes) {
             Ok(mcp_response) => {
-
-            // 检查是否是工具调用响应
-            if let (Some(id), Some(result)) = (
-                original_request.get("id"),
-                mcp_response.get("result")
-            ) {
-                if let Some(tool_name) = original_request
-                    .get("params")
-                    .and_then(|p| p.get("name"))
-                    .and_then(|n| n.as_str())
+                // 检查是否是工具调用响应
+                if let (Some(_id), Some(result)) =
+                    (original_request.get("id"), mcp_response.get("result"))
+                    && let Some(tool_name) = original_request
+                        .get("params")
+                        .and_then(|p| p.get("name"))
+                        .and_then(|n| n.as_str())
                 {
                     let result_json = serde_json::to_string(result).ok();
 
@@ -334,21 +335,25 @@ impl McpStorage {
                         None, // 执行时间需要在实际调用处测量
                         "success",
                         None,
-                    ).await {
-                        Ok(_) => {},
-                        Err(e) => error!("McpStorage: 更新工具调用结果失败: {} - {}", tool_name, e),
+                    )
+                    .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("McpStorage: 更新工具调用结果失败: {} - {}", tool_name, e)
+                        }
                     }
                 }
-            }
 
-            // 检查是否有错误响应
-            if let Some(error) = mcp_response.get("error") {
-                if let Some(tool_name) = original_request
-                    .get("params")
-                    .and_then(|p| p.get("name"))
-                    .and_then(|n| n.as_str())
+                // 检查是否有错误响应
+                if let Some(error) = mcp_response.get("error")
+                    && let Some(tool_name) = original_request
+                        .get("params")
+                        .and_then(|p| p.get("name"))
+                        .and_then(|n| n.as_str())
                 {
-                    let error_message = error.get("message")
+                    let error_message = error
+                        .get("message")
                         .and_then(|m| m.as_str())
                         .unwrap_or("未知错误");
 
@@ -360,13 +365,20 @@ impl McpStorage {
                         None,
                         "error",
                         Some(error_message),
-                    ).await {
-                        Ok(_) => warn!("McpStorage: 工具调用失败: {} - {}", tool_name, error_message),
-                        Err(e) => error!("McpStorage: 更新工具调用错误记录失败: {} - {}", tool_name, e),
+                    )
+                    .await
+                    {
+                        Ok(_) => warn!(
+                            "McpStorage: 工具调用失败: {} - {}",
+                            tool_name, error_message
+                        ),
+                        Err(e) => error!(
+                            "McpStorage: 更新工具调用错误记录失败: {} - {}",
+                            tool_name, e
+                        ),
                     }
                 }
             }
-            },
             Err(_) => {
                 // SSE响应解析失败，静默处理
             }
@@ -399,7 +411,7 @@ impl McpStorage {
                 WHERE session_id = $5 AND tool_name = $6 AND status = 'pending'
                 ORDER BY id DESC LIMIT 1
             )
-            "#
+            "#,
         )
         .bind(result)
         .bind(execution_time_ms)
@@ -413,46 +425,46 @@ impl McpStorage {
         Ok(query_result.rows_affected())
     }
 
-    /// 异步记录工具调用（用于MCP服务器内部调用）
-    pub async fn record_tool_call_async(
-        db: &DatabaseConnection,
-        user_id: i64,
-        session_id: Option<String>,
-        tool_name: &str,
-        arguments: &Value,
-        result: &Value,
-        execution_time_ms: i32,
-        status: &str,
-        error_message: Option<&str>,
-        transport_type: &str,
-        endpoint: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let arguments_json = serde_json::to_string(arguments).ok();
-        let result_json = serde_json::to_string(result).ok();
+    // /// 异步记录工具调用（用于MCP服务器内部调用）
+    // pub async fn record_tool_call_async(
+    //     db: &DatabaseConnection,
+    //     user_id: i64,
+    //     session_id: Option<String>,
+    //     tool_name: &str,
+    //     arguments: &Value,
+    //     result: &Value,
+    //     execution_time_ms: i32,
+    //     status: &str,
+    //     error_message: Option<&str>,
+    //     transport_type: &str,
+    //     endpoint: &str,
+    // ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    //     let arguments_json = serde_json::to_string(arguments).ok();
+    //     let result_json = serde_json::to_string(result).ok();
 
-        sqlx::query(
-            r#"
-            INSERT INTO mcp_tool_calls
-            (user_id, session_id, tool_name, request_arguments, response_result,
-             execution_time_ms, status, error_message, transport_type, endpoint)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            "#
-        )
-        .bind(user_id)
-        .bind(session_id)
-        .bind(tool_name)
-        .bind(arguments_json)
-        .bind(result_json)
-        .bind(execution_time_ms)
-        .bind(status)
-        .bind(error_message)
-        .bind(transport_type)
-        .bind(endpoint)
-        .execute(db.pool())
-        .await?;
+    //     sqlx::query(
+    //         r#"
+    //         INSERT INTO mcp_tool_calls
+    //         (user_id, session_id, tool_name, request_arguments, response_result,
+    //          execution_time_ms, status, error_message, transport_type, endpoint)
+    //         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    //         "#,
+    //     )
+    //     .bind(user_id)
+    //     .bind(session_id)
+    //     .bind(tool_name)
+    //     .bind(arguments_json)
+    //     .bind(result_json)
+    //     .bind(execution_time_ms)
+    //     .bind(status)
+    //     .bind(error_message)
+    //     .bind(transport_type)
+    //     .bind(endpoint)
+    //     .execute(db.pool())
+    //     .await?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
 
 /// 生成会话ID
@@ -461,23 +473,27 @@ fn generate_session_id(request: &Request, user_id: &i64) -> String {
     use std::hash::{Hash, Hasher};
 
     // 1. 优先使用客户端提供的会话ID（Cherry Studio 发送全小写 header）
-    if let Some(session_id) = request.headers().get("mcp-session-id")
-        .and_then(|v| v.to_str().ok()) {
-            info!("McpStorage: 使用客户端提供的会话ID: {}", session_id);
+    if let Some(session_id) = request
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+    {
+        info!("McpStorage: 使用客户端提供的会话ID: {}", session_id);
         return session_id.to_string();
     }
 
     // 2. 基于稳定标识符生成会话ID（不包含时间戳）
     let mut hasher = DefaultHasher::new();
-    
+
     // 对用户ID进行哈希
     user_id.hash(&mut hasher);
-    
+
     // 对路径进行哈希（区分 /mcp 和 /sse）
     request.uri().path().hash(&mut hasher);
-    
+
     // 对用户代理进行哈希（同一客户端产生相同的ID）
-    request.headers()
+    request
+        .headers()
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
@@ -491,21 +507,37 @@ fn generate_session_id(request: &Request, user_id: &i64) -> String {
 fn extract_client_info(request: &Request) -> Value {
     let mut client_info = serde_json::Map::new();
 
-    if let Some(user_agent) = request.headers()
+    if let Some(user_agent) = request
+        .headers()
         .get("user-agent")
-        .and_then(|v| v.to_str().ok()) {
-        client_info.insert("user_agent".to_string(), Value::String(user_agent.to_string()));
+        .and_then(|v| v.to_str().ok())
+    {
+        client_info.insert(
+            "user_agent".to_string(),
+            Value::String(user_agent.to_string()),
+        );
     }
 
-    if let Some(forwarded_for) = request.headers()
+    if let Some(forwarded_for) = request
+        .headers()
         .get("x-forwarded-for")
         .or_else(|| request.headers().get("x-real-ip"))
-        .and_then(|v| v.to_str().ok()) {
-        client_info.insert("client_ip".to_string(), Value::String(forwarded_for.to_string()));
+        .and_then(|v| v.to_str().ok())
+    {
+        client_info.insert(
+            "client_ip".to_string(),
+            Value::String(forwarded_for.to_string()),
+        );
     }
 
-    client_info.insert("request_path".to_string(), Value::String(request.uri().path().to_string()));
-    client_info.insert("request_method".to_string(), Value::String(request.method().to_string()));
+    client_info.insert(
+        "request_path".to_string(),
+        Value::String(request.uri().path().to_string()),
+    );
+    client_info.insert(
+        "request_method".to_string(),
+        Value::String(request.method().to_string()),
+    );
 
     Value::Object(client_info)
 }

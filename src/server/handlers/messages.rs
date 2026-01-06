@@ -1,15 +1,13 @@
 use axum::{
-    extract::{Query, State, Path, Extension},
+    extract::{Extension, Path, Query, State},
     response::Json,
 };
-use tracing::{info, error, warn};
 use sqlx::Row;
-use utoipa::path;
-use serde_json::json;
+use tracing::{error, info, warn};
 
-use crate::server::models::*;
-use crate::server::middleware::AuthUser;
 use super::chat::ServerState;
+use crate::server::middleware::AuthUser;
+use crate::server::models::*;
 
 /// 获取对话的消息历史
 #[utoipa::path(
@@ -74,12 +72,14 @@ pub async fn list_messages_handler(
     Path(conversation_id): Path<String>,
     Query(params): Query<ListMessagesQuery>,
 ) -> Result<Json<MessageListResponse>, ErrorResponse> {
-    info!("获取消息历史: conversation_id={}, limit={}, offset={}, user_id={}",
-          conversation_id, params.limit, params.offset, auth_user.user_id);
+    info!(
+        "获取消息历史: conversation_id={}, limit={}, offset={}, user_id={}",
+        conversation_id, params.limit, params.offset, auth_user.user_id
+    );
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -98,7 +98,10 @@ pub async fn list_messages_handler(
     })?;
 
     if !conversation_exists {
-        warn!("用户 {} 尝试访问无权限的对话 {}", auth_user.user_id, conversation_id);
+        warn!(
+            "用户 {} 尝试访问无权限的对话 {}",
+            auth_user.user_id, conversation_id
+        );
         return Err(ErrorResponse {
             error: "conversation_not_found".to_string(),
             message: "对话不存在或无权访问".to_string(),
@@ -112,11 +115,23 @@ pub async fn list_messages_handler(
     // 构建基本查询SQL - 使用PostgreSQL参数占位符
     let base_sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
          FROM messages WHERE conversation_id = $1";
-    
-    let (sql, param_offset) = if let Some(_before_id) = params.before {
-        (format!("{} AND message_id < $2 ORDER BY created_at ASC, message_id ASC LIMIT $3 OFFSET $4", base_sql), 2)
+
+    let (sql, _param_offset) = if let Some(_before_id) = params.before {
+        (
+            format!(
+                "{} AND message_id < $2 ORDER BY created_at ASC, message_id ASC LIMIT $3 OFFSET $4",
+                base_sql
+            ),
+            2,
+        )
     } else {
-        (format!("{} ORDER BY created_at ASC, message_id ASC LIMIT $2 OFFSET $3", base_sql), 1)
+        (
+            format!(
+                "{} ORDER BY created_at ASC, message_id ASC LIMIT $2 OFFSET $3",
+                base_sql
+            ),
+            1,
+        )
     };
 
     // 执行查询
@@ -130,45 +145,63 @@ pub async fn list_messages_handler(
     query = query.bind(params.limit);
     query = query.bind(params.offset);
 
-    let rows = query
-        .fetch_all(state.database.pool())
-        .await
-        .map_err(|e| {
-            error!("查询消息历史失败: {}", e);
-            ErrorResponse {
-                error: "database_error".to_string(),
-                message: "查询消息历史失败".to_string(),
-                details: Some(serde_json::json!({
-                    "error": e.to_string()
-                })),
-                timestamp: chrono::Local::now(),
-            }
-        })?;
+    let rows = query.fetch_all(state.database.pool()).await.map_err(|e| {
+        error!("查询消息历史失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "查询消息历史失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Local::now(),
+        }
+    })?;
 
     // 转换为API模型
     let messages: Vec<Message> = rows
         .into_iter()
         .map(|row| {
-            let metadata_str: Option<String> = row.try_get::<Option<String>, _>("metadata").ok().flatten();
+            let metadata_str: Option<String> =
+                row.try_get::<Option<String>, _>("metadata").ok().flatten();
             let metadata = metadata_str.and_then(|s| serde_json::from_str(&s).ok());
 
             Message {
                 id: Some(row.try_get::<i64, _>("message_id").unwrap_or(0) as i32),
-                conversation_id: row.try_get::<String, _>("conversation_id").unwrap_or_default(),
+                conversation_id: row
+                    .try_get::<String, _>("conversation_id")
+                    .unwrap_or_default(),
                 role: row.try_get::<String, _>("role").unwrap_or_default(),
                 content: row.try_get::<String, _>("content").unwrap_or_default(),
                 model: row.try_get::<Option<String>, _>("model").ok().flatten(),
-                usage: if row.try_get::<Option<i32>, _>("prompt_tokens").ok().flatten().is_some() {
+                usage: if row
+                    .try_get::<Option<i32>, _>("prompt_tokens")
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
                     Some(TokenUsage {
-                        prompt_tokens: row.try_get::<Option<i32>, _>("prompt_tokens").ok().flatten().unwrap_or(0) as u32,
-                        completion_tokens: row.try_get::<Option<i32>, _>("completion_tokens").ok().flatten().unwrap_or(0) as u32,
-                        total_tokens: row.try_get::<Option<i32>, _>("total_tokens").ok().flatten().unwrap_or(0) as u32,
+                        prompt_tokens: row
+                            .try_get::<Option<i32>, _>("prompt_tokens")
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0) as u32,
+                        completion_tokens: row
+                            .try_get::<Option<i32>, _>("completion_tokens")
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0) as u32,
+                        total_tokens: row
+                            .try_get::<Option<i32>, _>("total_tokens")
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0) as u32,
                     })
                 } else {
                     None
                 },
                 metadata,
-                created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+                created_at: row
+                    .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
                     .unwrap_or_else(|_| chrono::Local::now()),
             }
         })
@@ -252,12 +285,14 @@ pub async fn get_message_handler(
     State(state): State<ServerState>,
     Path((conversation_id, message_id)): Path<(String, i32)>,
 ) -> Result<Json<Message>, ErrorResponse> {
-    info!("获取消息详情: conversation_id={}, message_id={}, user_id={}",
-          conversation_id, message_id, auth_user.user_id);
+    info!(
+        "获取消息详情: conversation_id={}, message_id={}, user_id={}",
+        conversation_id, message_id, auth_user.user_id
+    );
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -276,7 +311,10 @@ pub async fn get_message_handler(
     })?;
 
     if !conversation_exists {
-        warn!("用户 {} 尝试访问无权限的对话 {} 的消息 {}", auth_user.user_id, conversation_id, message_id);
+        warn!(
+            "用户 {} 尝试访问无权限的对话 {} 的消息 {}",
+            auth_user.user_id, conversation_id, message_id
+        );
         return Err(ErrorResponse {
             error: "conversation_not_found".to_string(),
             message: "对话不存在或无权访问".to_string(),
@@ -313,21 +351,41 @@ pub async fn get_message_handler(
 
     let message = Message {
         id: Some(row.try_get::<i64, _>("message_id").unwrap_or(0) as i32),
-        conversation_id: row.try_get::<String, _>("conversation_id").unwrap_or_default(),
+        conversation_id: row
+            .try_get::<String, _>("conversation_id")
+            .unwrap_or_default(),
         role: row.try_get::<String, _>("role").unwrap_or_default(),
         content: row.try_get::<String, _>("content").unwrap_or_default(),
         model: row.try_get::<Option<String>, _>("model").ok().flatten(),
-        usage: if row.try_get::<Option<i32>, _>("prompt_tokens").ok().flatten().is_some() {
+        usage: if row
+            .try_get::<Option<i32>, _>("prompt_tokens")
+            .ok()
+            .flatten()
+            .is_some()
+        {
             Some(TokenUsage {
-                prompt_tokens: row.try_get::<Option<i32>, _>("prompt_tokens").ok().flatten().unwrap_or(0) as u32,
-                completion_tokens: row.try_get::<Option<i32>, _>("completion_tokens").ok().flatten().unwrap_or(0) as u32,
-                total_tokens: row.try_get::<Option<i32>, _>("total_tokens").ok().flatten().unwrap_or(0) as u32,
+                prompt_tokens: row
+                    .try_get::<Option<i32>, _>("prompt_tokens")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0) as u32,
+                completion_tokens: row
+                    .try_get::<Option<i32>, _>("completion_tokens")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0) as u32,
+                total_tokens: row
+                    .try_get::<Option<i32>, _>("total_tokens")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0) as u32,
             })
         } else {
             None
         },
         metadata,
-        created_at: row.try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+        created_at: row
+            .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
             .unwrap_or_else(|_| chrono::Local::now()),
     };
 
@@ -367,12 +425,14 @@ pub async fn delete_message_handler(
     State(state): State<ServerState>,
     Path((conversation_id, message_id)): Path<(String, i32)>,
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
-    info!("删除消息: conversation_id={}, message_id={}, user_id={}",
-          conversation_id, message_id, auth_user.user_id);
+    info!(
+        "删除消息: conversation_id={}, message_id={}, user_id={}",
+        conversation_id, message_id, auth_user.user_id
+    );
 
     // 验证用户是否有权限访问该对话
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
     )
     .bind(&conversation_id)
     .bind(auth_user.user_id as i64)
@@ -391,7 +451,10 @@ pub async fn delete_message_handler(
     })?;
 
     if !conversation_exists {
-        warn!("用户 {} 尝试删除无权限对话 {} 的消息 {}", auth_user.user_id, conversation_id, message_id);
+        warn!(
+            "用户 {} 尝试删除无权限对话 {} 的消息 {}",
+            auth_user.user_id, conversation_id, message_id
+        );
         return Err(ErrorResponse {
             error: "conversation_not_found".to_string(),
             message: "对话不存在或无权访问".to_string(),
@@ -445,111 +508,117 @@ pub async fn delete_message_handler(
     })))
 }
 
-/// 添加新消息到对话
-pub async fn add_message_handler(
-    Extension(auth_user): Extension<AuthUser>,
-    State(state): State<ServerState>,
-    Path(conversation_id): Path<String>,
-    Json(request): Json<Message>,
-) -> Result<Json<Message>, ErrorResponse> {
-    info!("添加消息到对话: conversation_id={}, role={}, user_id={}",
-          conversation_id, request.role, auth_user.user_id);
+// /// 添加新消息到对话
+// pub async fn add_message_handler(
+//     Extension(auth_user): Extension<AuthUser>,
+//     State(state): State<ServerState>,
+//     Path(conversation_id): Path<String>,
+//     Json(request): Json<Message>,
+// ) -> Result<Json<Message>, ErrorResponse> {
+//     info!(
+//         "添加消息到对话: conversation_id={}, role={}, user_id={}",
+//         conversation_id, request.role, auth_user.user_id
+//     );
 
-    // 验证用户是否有权限访问该对话
-    let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
-    )
-    .bind(&conversation_id)
-    .bind(auth_user.user_id as i64)
-    .fetch_one(state.database.pool())
-    .await
-    .map_err(|e| {
-        error!("验证对话权限失败: {}", e);
-        ErrorResponse {
-            error: "database_error".to_string(),
-            message: "验证对话权限失败".to_string(),
-            details: Some(serde_json::json!({
-                "error": e.to_string()
-            })),
-            timestamp: chrono::Local::now(),
-        }
-    })?;
+//     // 验证用户是否有权限访问该对话
+//     let conversation_exists: bool = sqlx::query_scalar(
+//         "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
+//     )
+//     .bind(&conversation_id)
+//     .bind(auth_user.user_id as i64)
+//     .fetch_one(state.database.pool())
+//     .await
+//     .map_err(|e| {
+//         error!("验证对话权限失败: {}", e);
+//         ErrorResponse {
+//             error: "database_error".to_string(),
+//             message: "验证对话权限失败".to_string(),
+//             details: Some(serde_json::json!({
+//                 "error": e.to_string()
+//             })),
+//             timestamp: chrono::Local::now(),
+//         }
+//     })?;
 
-    if !conversation_exists {
-        warn!("用户 {} 尝试向无权限对话 {} 添加消息", auth_user.user_id, conversation_id);
-        return Err(ErrorResponse {
-            error: "conversation_not_found".to_string(),
-            message: "对话不存在或无权访问".to_string(),
-            details: Some(serde_json::json!({
-                "conversation_id": conversation_id
-            })),
-            timestamp: chrono::Local::now(),
-        });
-    }
+//     if !conversation_exists {
+//         warn!(
+//             "用户 {} 尝试向无权限对话 {} 添加消息",
+//             auth_user.user_id, conversation_id
+//         );
+//         return Err(ErrorResponse {
+//             error: "conversation_not_found".to_string(),
+//             message: "对话不存在或无权访问".to_string(),
+//             details: Some(serde_json::json!({
+//                 "conversation_id": conversation_id
+//             })),
+//             timestamp: chrono::Local::now(),
+//         });
+//     }
 
-    // 将metadata转换为JSON字符串
-    let metadata_str = request.metadata
-        .as_ref()
-        .and_then(|m| serde_json::to_string(m).ok());
+//     // 将metadata转换为JSON字符串
+//     let metadata_str = request
+//         .metadata
+//         .as_ref()
+//         .and_then(|m| serde_json::to_string(m).ok());
 
-    let sql = "INSERT INTO messages (conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at) \
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING message_id";
+//     let sql = "INSERT INTO messages (conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at) \
+//               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING message_id";
 
-    let result = sqlx::query(sql)
-        .bind(&conversation_id)
-        .bind(&request.role)
-        .bind(&request.content)
-        .bind(&request.model)
-        .bind(request.usage.as_ref().map(|u| u.prompt_tokens as i32))
-        .bind(request.usage.as_ref().map(|u| u.completion_tokens as i32))
-        .bind(request.usage.as_ref().map(|u| u.total_tokens as i32))
-        .bind(metadata_str)
-        .bind(chrono::Local::now())
-        .fetch_one(state.database.pool())
-        .await
-        .map_err(|e| {
-            error!("添加消息失败: {}", e);
-            ErrorResponse {
-                error: "database_error".to_string(),
-                message: "添加消息失败".to_string(),
-                details: Some(serde_json::json!({
-                    "error": e.to_string()
-                })),
-                timestamp: chrono::Local::now(),
-            }
-        })?;
+//     let result = sqlx::query(sql)
+//         .bind(&conversation_id)
+//         .bind(&request.role)
+//         .bind(&request.content)
+//         .bind(&request.model)
+//         .bind(request.usage.as_ref().map(|u| u.prompt_tokens as i32))
+//         .bind(request.usage.as_ref().map(|u| u.completion_tokens as i32))
+//         .bind(request.usage.as_ref().map(|u| u.total_tokens as i32))
+//         .bind(metadata_str)
+//         .bind(chrono::Local::now())
+//         .fetch_one(state.database.pool())
+//         .await
+//         .map_err(|e| {
+//             error!("添加消息失败: {}", e);
+//             ErrorResponse {
+//                 error: "database_error".to_string(),
+//                 message: "添加消息失败".to_string(),
+//                 details: Some(serde_json::json!({
+//                     "error": e.to_string()
+//                 })),
+//                 timestamp: chrono::Local::now(),
+//             }
+//         })?;
 
-    let message_id: i64 = result.try_get("message_id").unwrap_or(0);
+//     let message_id: i64 = result.try_get("message_id").unwrap_or(0);
 
-    // 更新对话的消息计数和更新时间
-    let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = $1 WHERE conversation_id = $2";
-    sqlx::query(update_sql)
-        .bind(chrono::Local::now())
-        .bind(&conversation_id)
-        .execute(state.database.pool())
-        .await
-        .map_err(|e| {
-            error!("更新对话信息失败: {}", e);
-            ErrorResponse {
-                error: "database_error".to_string(),
-                message: "更新对话信息失败".to_string(),
-                details: Some(serde_json::json!({
-                    "error": e.to_string()
-                })),
-                timestamp: chrono::Local::now(),
-            }
-        })?;
+//     // 更新对话的消息计数和更新时间
+//     let update_sql = "UPDATE conversations SET message_count = message_count + 1, updated_at = $1 WHERE conversation_id = $2";
+//     sqlx::query(update_sql)
+//         .bind(chrono::Local::now())
+//         .bind(&conversation_id)
+//         .execute(state.database.pool())
+//         .await
+//         .map_err(|e| {
+//             error!("更新对话信息失败: {}", e);
+//             ErrorResponse {
+//                 error: "database_error".to_string(),
+//                 message: "更新对话信息失败".to_string(),
+//                 details: Some(serde_json::json!({
+//                     "error": e.to_string()
+//                 })),
+//                 timestamp: chrono::Local::now(),
+//             }
+//         })?;
 
-    let message = Message {
-        id: Some(message_id as i32),
-        conversation_id: conversation_id.clone(),
-        role: request.role,
-        content: request.content,
-        model: request.model,
-        usage: request.usage,
-        metadata: request.metadata,
-        created_at: chrono::Local::now(),
-    };
+//     let message = Message {
+//         id: Some(message_id as i32),
+//         conversation_id: conversation_id.clone(),
+//         role: request.role,
+//         content: request.content,
+//         model: request.model,
+//         usage: request.usage,
+//         metadata: request.metadata,
+//         created_at: chrono::Local::now(),
+//     };
 
-    Ok(Json(message))
-}
+//     Ok(Json(message))
+// }

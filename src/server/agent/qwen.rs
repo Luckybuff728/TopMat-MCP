@@ -1,24 +1,18 @@
-use rig::prelude::*;
-use rig::client::{ProviderClient, CompletionClient};
-use std::sync::Arc;
+use crate::server::middleware::auth::AuthUser;
 use crate::server::models::*;
 use crate::server::request::handle_chat_request;
-use crate::server::mcp::McpAgent;
-use crate::server::middleware::auth::AuthUser;
-
-use rmcp::{model::{ClientInfo, ClientCapabilities, Implementation}, ServiceExt};
-use rmcp::transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig};
+use rig::client::CompletionClient;
 
 /// 处理通义千问请求并返回ChatResponse (qwen-plus)
 pub async fn qwen_plus(
     request: ChatRequest,
-    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let model = &request.model;
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.5);
-    let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
+    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent(model)
         .preamble(system_prompt)
         .temperature(temperature as f64)
@@ -30,12 +24,12 @@ pub async fn qwen_plus(
 /// 处理通义千问请求并返回ChatResponse (qwen-turbo)
 pub async fn qwen_turbo(
     request: ChatRequest,
-    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
+    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwen-turbo")
         .preamble(system_prompt)
         .temperature(temperature as f64)
@@ -47,12 +41,12 @@ pub async fn qwen_turbo(
 /// 处理通义千问请求并返回ChatResponse (qwen-max)
 pub async fn qwen_max(
     request: ChatRequest,
-    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
+    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwen-max")
         .preamble(system_prompt)
         .temperature(temperature as f64)
@@ -69,7 +63,7 @@ pub async fn qwen_flash(
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
+    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwen-flash")
         .preamble(system_prompt)
         .temperature(temperature as f64)
@@ -81,12 +75,12 @@ pub async fn qwen_flash(
 /// 处理通义千问请求并返回ChatResponse (qwq-plus)
 pub async fn qwq_plus(
     request: ChatRequest,
-    _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(&api_key)
+    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwq-plus")
         .preamble(system_prompt)
         .temperature(temperature as f64)
@@ -95,14 +89,13 @@ pub async fn qwq_plus(
     handle_chat_request(agent, request).await
 }
 
-
-pub async fn CalphaMesh(
+pub async fn calphamesh(
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let user_api_key = _auth_user.api_key.clone();
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
-    let qwen_client = rig::providers::qwen::Client::new_with_api_key(&api_key);
+    let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
     let prompt = format!(
         "你是一个专业的材料热力学计算助手，专门负责 CalphaMesh 模拟任务的管理。
 你的主要职责包括：
@@ -114,7 +107,7 @@ pub async fn CalphaMesh(
         user_api_key
     );
 
-    let mut agent_builder = qwen_client
+    let agent_builder = qwen_client
         .agent("qwen-flash")
         .preamble(&prompt)
         .temperature(0.8)
@@ -128,13 +121,13 @@ pub async fn CalphaMesh(
     handle_chat_request(raw_agent, request).await
 }
 
-pub async fn PhaseField(
+pub async fn phase_field(
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let user_api_key = _auth_user.api_key.clone();
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
-    let qwen_client = rig::providers::qwen::Client::new_with_api_key(&api_key);
+    let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
     let prompt = format!(
         "你是一个专业的相场模拟 (Phase Field) 专家助手，负责材料微观组织演化的数值模拟管理。
 你的主要职责包括：
@@ -145,7 +138,7 @@ pub async fn PhaseField(
 请引导用户正确配置模拟参数，确保模拟流程的完整性。在讨论模拟结果时，请结合物理背景提供深入的见解。",
         user_api_key
     );
-    let mut agent = qwen_client
+    let agent = qwen_client
         .agent("qwen-flash")
         .preamble(&prompt)
         .temperature(0.8)
@@ -162,14 +155,13 @@ pub async fn PhaseField(
     handle_chat_request(agent, request).await
 }
 
-pub async fn ML_Server(
+pub async fn ml_server(
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
-
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
-    let qwen_client = rig::providers::qwen::Client::new_with_api_key(&api_key);
-    let mut agent_builder = qwen_client
+    let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
+    let agent_builder = qwen_client
         .agent("qwen-flash")
         .preamble("你是一个专业的机器学习模型管理助手，专门负责 ONNX 模型的运维与推理服务。
 你的主要职责包括：
@@ -205,7 +197,7 @@ pub async fn ML_Server(
 //         .auth_header(mcp_api_key);
 
 //     let transport = StreamableHttpClientTransport::from_config(config);
-    
+
 //     let client_info = ClientInfo {
 //         protocol_version: Default::default(),
 //         capabilities: ClientCapabilities::default(),

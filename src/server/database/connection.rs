@@ -1,5 +1,5 @@
-use sqlx::{Pool, Postgres, PgPool, postgres::PgPoolOptions};
-use tracing::{info, error};
+use sqlx::{PgPool, postgres::PgPoolOptions};
+use tracing::info;
 
 /// 数据库连接池
 #[derive(Clone)]
@@ -13,23 +13,21 @@ impl DatabaseConnection {
         &self.pool
     }
 
-    /// 检查数据库连接是否健康
-    pub async fn health_check(&self) -> Result<(), sqlx::Error> {
-        let result = sqlx::query("SELECT 1")
-            .fetch_one(&self.pool)
-            .await;
+    // /// 检查数据库连接是否健康
+    // pub async fn health_check(&self) -> Result<(), sqlx::Error> {
+    //     let result = sqlx::query("SELECT 1").fetch_one(&self.pool).await;
 
-        match result {
-            Ok(_) => {
-                info!("数据库连接健康检查通过");
-                Ok(())
-            }
-            Err(e) => {
-                error!("数据库连接健康检查失败: {}", e);
-                Err(e)
-            }
-        }
-    }
+    //     match result {
+    //         Ok(_) => {
+    //             info!("数据库连接健康检查通过");
+    //             Ok(())
+    //         }
+    //         Err(e) => {
+    //             error!("数据库连接健康检查失败: {}", e);
+    //             Err(e)
+    //         }
+    //     }
+    // }
 }
 
 /// 初始化数据库连接
@@ -199,38 +197,50 @@ async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_usage_stats_user_date ON usage_stats (user_id, request_date)")
         .execute(pool)
         .await?;
 
     // 创建MCP相关索引
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_sessions_session_id ON mcp_sessions (session_id)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_sessions_session_id ON mcp_sessions (session_id)",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_sessions_user_id ON mcp_sessions (user_id)")
         .execute(pool)
         .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_session_id ON mcp_tool_calls (session_id)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_session_id ON mcp_tool_calls (session_id)",
+    )
+    .execute(pool)
+    .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_user_id ON mcp_tool_calls (user_id)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_user_id ON mcp_tool_calls (user_id)",
+    )
+    .execute(pool)
+    .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_tool_name ON mcp_tool_calls (tool_name)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_tool_name ON mcp_tool_calls (tool_name)",
+    )
+    .execute(pool)
+    .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_created_at ON mcp_tool_calls (created_at)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_created_at ON mcp_tool_calls (created_at)",
+    )
+    .execute(pool)
+    .await?;
 
     info!("数据库迁移完成");
     Ok(())

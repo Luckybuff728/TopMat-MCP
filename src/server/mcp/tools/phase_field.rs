@@ -2,16 +2,13 @@
 //!
 //! 提供与  API 集成的相场模拟工具，支持 TiAlN 调幅分解模拟和 PVD 物理气相沉积模拟
 
+use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
-use rig::{
-    completion::ToolDefinition,
-    tool::Tool,
-};
 
-use reqwest;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use reqwest;
 
 //  API 基础 URL
 const MESOSPIRE_API_URL: &str = "http://192.168.7.103:4001";
@@ -304,8 +301,9 @@ impl Tool for SubmitSpinodalDecompositionTask {
             "type": "CahnHilliard_Vector"
         });
 
-        let task_config_str = serde_json::to_string(&task_config)
-            .map_err(|e| PhaseFieldError::JsonError(format!("Failed to serialize config: {}", e)))?;
+        let task_config_str = serde_json::to_string(&task_config).map_err(|e| {
+            PhaseFieldError::JsonError(format!("Failed to serialize config: {}", e))
+        })?;
 
         let task_config_base64 = STANDARD.encode(task_config_str.as_bytes());
 
@@ -340,9 +338,7 @@ impl Tool for SubmitSpinodalDecompositionTask {
 
         Ok(format!(
             "调幅分解模拟任务已提交\nID: {}\n名称: {}\n进程ID: {}",
-            task_response.data.task_id,
-            task_response.data.task_name,
-            task_response.data.pid
+            task_response.data.task_id, task_response.data.task_name, task_response.data.pid
         ))
     }
 }
@@ -402,7 +398,9 @@ impl Tool for SubmitPvdSimulationTask {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let client = reqwest::Client::new();
-        let task_name = args.task_name.unwrap_or_else(|| "PVD物理气相沉积模拟".to_string());
+        let task_name = args
+            .task_name
+            .unwrap_or_else(|| "PVD物理气相沉积模拟".to_string());
         let ay = args.ay.unwrap_or(-0.29);
         let b = args.b.unwrap_or(0.25);
         let c = args.c.unwrap_or(2.5);
@@ -455,8 +453,9 @@ impl Tool for SubmitPvdSimulationTask {
             "type": "PhysicalVapor"
         });
 
-        let task_config_str = serde_json::to_string(&task_config)
-            .map_err(|e| PhaseFieldError::JsonError(format!("Failed to serialize config: {}", e)))?;
+        let task_config_str = serde_json::to_string(&task_config).map_err(|e| {
+            PhaseFieldError::JsonError(format!("Failed to serialize config: {}", e))
+        })?;
 
         let task_config_base64 = STANDARD.encode(task_config_str.as_bytes());
 
@@ -491,9 +490,7 @@ impl Tool for SubmitPvdSimulationTask {
 
         Ok(format!(
             "PVD模拟任务已提交\nID: {}\n名称: {}\n进程ID: {}",
-            task_response.data.task_id,
-            task_response.data.task_name,
-            task_response.data.pid
+            task_response.data.task_id, task_response.data.task_name, task_response.data.pid
         ))
     }
 }
@@ -644,12 +641,24 @@ impl Tool for GetTaskStatus {
 
         Ok(format!(
             "任务状态\nID: {}\n名称: {}\n状态: {}\n进程ID: {}\n开始: {}\n运行时长: {}秒",
-            status_response.data.task_id.as_deref().unwrap_or(&args.task_id),
+            status_response
+                .data
+                .task_id
+                .as_deref()
+                .unwrap_or(&args.task_id),
             status_response.data.task_name.as_deref().unwrap_or("未知"),
             status_response.data.status.as_deref().unwrap_or("未知"),
-            status_response.data.pid.map(|p| p.to_string()).unwrap_or_else(|| "未知".to_string()),
+            status_response
+                .data
+                .pid
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "未知".to_string()),
             status_response.data.start_time.as_deref().unwrap_or("未知"),
-            status_response.data.duration_seconds.map(|d| d.to_string()).unwrap_or_else(|| "未知".to_string())
+            status_response
+                .data
+                .duration_seconds
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "未知".to_string())
         ))
     }
 }
@@ -718,8 +727,7 @@ impl Tool for StopTask {
 
         Ok(format!(
             "任务已停止\nID: {}\n名称: {}",
-            stop_response.data.task_id,
-            stop_response.data.task_name
+            stop_response.data.task_id, stop_response.data.task_name
         ))
     }
 }
@@ -864,8 +872,7 @@ impl Tool for RetrieveFile {
 
         Ok(format!(
             "文件内容\n路径: {}\n\n{}",
-            args.file_path,
-            file_content
+            args.file_path, file_content
         ))
     }
 }

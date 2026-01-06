@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 /// 聊天请求结构
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -226,7 +226,7 @@ pub struct Conversation {
     pub conversation_id: Option<String>,
     /// 用户ID
     pub user_id: i32,
-        /// 对话标题
+    /// 对话标题
     pub title: Option<String>,
     /// 使用的AI模型
     pub model: String,
@@ -596,10 +596,10 @@ pub fn generate_conversation_id() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// 验证会话ID格式
-pub fn is_valid_conversation_id(id: &str) -> bool {
-    id.parse::<Uuid>().is_ok()
-}
+// /// 验证会话ID格式
+// pub fn is_valid_conversation_id(id: &str) -> bool {
+//     id.parse::<Uuid>().is_ok()
+// }
 
 // ============== MCP 相关数据结构 ==============
 
@@ -646,7 +646,8 @@ pub struct McpToolCallResponse {
     /// 调用结果
     pub content: Vec<McpContent>,
     /// 是否工具出错
-    pub isError: Option<bool>,
+    #[serde(rename = "isError")]
+    pub is_error: Option<bool>,
 }
 
 /// MCP 内容块
@@ -665,11 +666,13 @@ pub struct McpContent {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct McpInitializeRequest {
     /// 协议版本
-    pub protocolVersion: String,
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
     /// 能力信息
     pub capabilities: serde_json::Value,
     /// 客户端信息
-    pub clientInfo: McpClientInfo,
+    #[serde(rename = "clientInfo")]
+    pub client_info: McpClientInfo,
 }
 
 /// MCP 客户端信息
@@ -685,9 +688,11 @@ pub struct McpClientInfo {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct McpInitializeResponse {
     /// 协议版本
-    pub protocolVersion: String,
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
     /// 能力信息
     pub capabilities: serde_json::Value,
     /// 服务器信息
-    pub serverInfo: McpServerInfo,
+    #[serde(rename = "serverInfo")]
+    pub server_info: McpServerInfo,
 }

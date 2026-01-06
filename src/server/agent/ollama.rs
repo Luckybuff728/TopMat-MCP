@@ -1,16 +1,12 @@
 use rig::prelude::*;
-use axum::{extract::Request, Extension};
 
 use crate::server::models::*;
 use crate::server::request::handle_chat_request;
-use crate::server::mcp::McpAgent;
-use crate::server::middleware::auth::AuthUser;
-
 
 /// 处理Ollama请求并返回ChatResponse (ollama-qwen3-4b)
 pub async fn ollama_qwen3_4b(
     request: ChatRequest,
-    _auth_user: crate::server::middleware::auth::AuthUser,  // 目前暂不使用，但为了统一接口
+    _auth_user: crate::server::middleware::auth::AuthUser, // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
@@ -26,7 +22,7 @@ pub async fn ollama_qwen3_4b(
 /// 处理Ollama请求并返回ChatResponse (ollama-llama3)
 pub async fn ollama_llama3(
     request: ChatRequest,
-    _auth_user: crate::server::middleware::auth::AuthUser,  // 目前暂不使用，但为了统一接口
+    _auth_user: crate::server::middleware::auth::AuthUser, // 目前暂不使用，但为了统一接口
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
@@ -110,7 +106,6 @@ pub async fn ollama_llama3(
 //         .rmcp_tools(tools, mcp_client.peer().to_owned());
 
 //     let agent = agent_builder.build();
-
 
 //     let mut stream = agent.stream_prompt("列出我的任务").await;
 //     let res = stream_to_stdout(&mut stream).await?;

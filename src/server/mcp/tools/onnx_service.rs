@@ -2,20 +2,16 @@
 //!
 //! 提供 ONNX Service API 交互的工具，用于模型管理、推理计算等功能
 
+use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use rig::{
-    completion::ToolDefinition,
-    tool::Tool,
-};
 
 use reqwest;
 
 // ONNX Service API 基础 URL
 const API_BASE_URL: &str = "http://111.22.21.99:10002";
-
 
 // ==================== 错误类型 ====================
 
@@ -286,7 +282,11 @@ impl Tool for OnnxModelsList {
 
         if !models_response.models.is_empty() {
             for model in models_response.models {
-                let status = if model.is_loaded { "已加载" } else { "未加载" };
+                let status = if model.is_loaded {
+                    "已加载"
+                } else {
+                    "未加载"
+                };
                 info_text.push_str(&format!(
                     "• {}: {} [{}] - {}\n  UUID: {}\n",
                     model.model.name,
@@ -434,16 +434,15 @@ impl Tool for OnnxUnloadModel {
             });
         }
 
-        let unload_response: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
+        // let unload_response: serde_json::Value = response
+        //     .json()
+        //     .await
+        //     .map_err(|e| OnnxServiceError::JsonError(e.to_string()))?;
 
-        let identifier = args.uuid.unwrap_or_else(|| args.model_name.unwrap_or_default());
-        Ok(format!(
-            "模型卸载成功: {}",
-            identifier
-        ))
+        let identifier = args
+            .uuid
+            .unwrap_or_else(|| args.model_name.unwrap_or_default());
+        Ok(format!("模型卸载成功: {}", identifier))
     }
 }
 
@@ -487,7 +486,7 @@ impl Tool for OnnxModelInference {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let client = reqwest::Client::new();
-        
+
         // 1. 首先获取模型配置以进行输入验证
         let config_url = format!("{}/models/{}/info", API_BASE_URL, args.uuid);
         let config_resp = client
@@ -514,7 +513,10 @@ impl Tool for OnnxModelInference {
         let mut missing_inputs = Vec::new();
         for input_spec in &config.config.inputs {
             if !args.inputs.contains_key(&input_spec.feature) {
-                missing_inputs.push(format!("{} ({})", input_spec.feature, input_spec.description));
+                missing_inputs.push(format!(
+                    "{} ({})",
+                    input_spec.feature, input_spec.description
+                ));
             }
         }
 
@@ -563,9 +565,7 @@ impl Tool for OnnxModelInference {
             result_text.push_str(&format!(
                 "• {}: {:.6} ({})
 ",
-                key,
-                output_value.value,
-                output_value.description
+                key, output_value.value, output_value.description
             ));
         }
 

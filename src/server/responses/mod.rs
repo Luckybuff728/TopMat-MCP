@@ -1,8 +1,5 @@
-use axum::{
-    http::StatusCode,
-    response::IntoResponse,
-};
 use crate::server::models::ErrorResponse;
+use axum::response::IntoResponse;
 
 // 实现ErrorResponse的IntoResponse
 impl IntoResponse for ErrorResponse {

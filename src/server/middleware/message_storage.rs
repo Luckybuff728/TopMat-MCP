@@ -1,17 +1,17 @@
 use axum::{
+    Extension,
+    body::Body,
     extract::{Request, State},
     http::StatusCode,
     middleware::Next,
-    response::{IntoResponse, Response},
-    Extension, body::Body,
+    response::Response,
 };
 use bytes::Bytes;
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
-use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, error, debug};
+use tracing::{debug, error, info};
 
 use crate::server::{
     database::DatabaseConnection,
@@ -38,7 +38,7 @@ impl MessageStorage {
     pub async fn store_messages(
         State(state): State<ServerState>,
         Extension(auth_user): Extension<AuthUser>,
-        mut request: Request,
+        request: Request,
         next: Next,
     ) -> Result<Response, StatusCode> {
         // 只处理 /v1/chat 端点
@@ -69,10 +69,11 @@ impl MessageStorage {
         };
 
         // 确保对话ID存在（如果没有则生成新的）
-        let conversation_id = chat_request.conversation_id
+        let conversation_id = chat_request
+            .conversation_id
             .clone()
             .unwrap_or_else(generate_conversation_id);
-        
+
         // 将确定的 conversation_id 设置回请求中，确保一致性
         chat_request.conversation_id = Some(conversation_id.clone());
 
@@ -81,13 +82,8 @@ impl MessageStorage {
         // 保存用户消息
         let db = state.database.clone();
         let user_id = auth_user.user_id as i64;
-        
-        if let Err(e) = save_user_message(
-            &db,
-            &chat_request,
-            user_id,
-            &conversation_id,
-        ).await {
+
+        if let Err(e) = save_user_message(&db, &chat_request, user_id, &conversation_id).await {
             error!("Failed to save user message: {}", e);
             // 继续处理请求，即使保存失败
         }
@@ -149,10 +145,15 @@ async fn handle_normal_response(
                 &chat_response,
                 context.user_id,
                 &context.conversation_id,
-            ).await {
+            )
+            .await
+            {
                 error!("Failed to save assistant message: {}", e);
             } else {
-                info!("MessageStorage: 已保存助手消息到对话 {}", context.conversation_id);
+                info!(
+                    "MessageStorage: 已保存助手消息到对话 {}",
+                    context.conversation_id
+                );
             }
         }
     }
@@ -173,7 +174,8 @@ async fn handle_streaming_response(
     }
 
     // 检查是否是 SSE 响应
-    let is_sse = response.headers()
+    let is_sse = response
+        .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .map(|v| v.contains("text/event-stream"))
@@ -187,23 +189,23 @@ async fn handle_streaming_response(
 
     // 创建一个新的流来包装原始响应流
     let (parts, body) = response.into_parts();
-    
+
     // 使用共享状态来收集流式内容
     let collected_content = Arc::new(Mutex::new(String::new()));
     let collected_reasoning = Arc::new(Mutex::new(String::new())); // 改为 String，累积推理内容
     let collected_tool_calls = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
     let collected_tool_results = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
     let final_response = Arc::new(Mutex::new(None));
-    
+
     let db_clone = db.clone();
     let conversation_id = context.conversation_id.clone();
     let user_id = context.user_id;
     let model = context.request_body.model.clone();
-    
+
     // 创建包装流
     let wrapped_stream = async_stream::stream! {
         let mut stream = body.into_data_stream();
-        
+
         while let Some(result) = stream.try_next().await.transpose() {
             match result {
                 Ok(chunk) => {
@@ -211,9 +213,8 @@ async fn handle_streaming_response(
                     if let Ok(text) = std::str::from_utf8(&chunk) {
                         // 处理 SSE 事件
                         for line in text.lines() {
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
-                                if let Ok(parsed) = serde_json::from_str::<StreamChunk>(data) {
+                            if let Some(data) = line.strip_prefix("data: ")
+                                && let Ok(parsed) = serde_json::from_str::<StreamChunk>(data) {
                                     match &parsed {
                                         StreamChunk::Text { text, .. } => {
                                             let mut content = collected_content.lock().await;
@@ -244,10 +245,9 @@ async fn handle_streaming_response(
                                         _ => {}
                                     }
                                 }
-                            }
                         }
                     }
-                    
+
                     // 转发原始块
                     yield Ok(chunk);
                 }
@@ -258,17 +258,17 @@ async fn handle_streaming_response(
                 }
             }
         }
-        
+
         // 流结束后保存助手消息（包含所有流式内容）
         let content = collected_content.lock().await.clone();
         let reasoning = collected_reasoning.lock().await.clone();
         let tool_calls = collected_tool_calls.lock().await.clone();
         let tool_results = collected_tool_results.lock().await.clone();
-        
+
         if !content.is_empty() || !reasoning.is_empty() || !tool_calls.is_empty() {
             // 构建完整的元数据
             let mut metadata = std::collections::HashMap::new();
-            
+
             // 将推理内容作为单个字符串保存
             if !reasoning.is_empty() {
                 metadata.insert("reasoning".to_string(), serde_json::json!(reasoning));
@@ -279,7 +279,7 @@ async fn handle_streaming_response(
             if !tool_results.is_empty() {
                 metadata.insert("tool_results".to_string(), serde_json::json!(tool_results));
             }
-            
+
             let chat_response = if let Some(final_resp) = final_response.lock().await.as_ref() {
                 // 使用最终响应，但添加收集的元数据
                 let mut resp = final_resp.clone();
@@ -296,7 +296,7 @@ async fn handle_streaming_response(
                     metadata,
                 }
             };
-            
+
             if let Err(e) = save_assistant_message(
                 &db_clone,
                 &chat_response,
@@ -323,7 +323,14 @@ async fn save_user_message(
     conversation_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 确保对话存在
-    ensure_conversation_exists(db, conversation_id, user_id, &request.message, &request.model).await?;
+    ensure_conversation_exists(
+        db,
+        conversation_id,
+        user_id,
+        &request.message,
+        &request.model,
+    )
+    .await?;
 
     // 保存用户消息
     info!("MessageStorage: 保存用户消息: {}", &request.message);
@@ -331,7 +338,7 @@ async fn save_user_message(
         r#"
         INSERT INTO messages (conversation_id, role, content, model, created_at)
         VALUES ($1, $2, $3, $4, NOW())
-        "#
+        "#,
     )
     .bind(conversation_id)
     .bind("user")
@@ -353,7 +360,7 @@ async fn save_assistant_message(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 验证对话权限
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
     )
     .bind(conversation_id)
     .bind(user_id)
@@ -361,13 +368,24 @@ async fn save_assistant_message(
     .await?;
 
     if !conversation_exists {
-        return Err(format!("Conversation {} not found or access denied for user {}", conversation_id, user_id).into());
+        return Err(format!(
+            "Conversation {} not found or access denied for user {}",
+            conversation_id, user_id
+        )
+        .into());
     }
 
     // 保存助手消息
-    let (prompt_tokens, completion_tokens, total_tokens) = chat_response.usage
+    let (prompt_tokens, completion_tokens, total_tokens) = chat_response
+        .usage
         .as_ref()
-        .map(|u| (u.prompt_tokens as i32, u.completion_tokens as i32, u.total_tokens as i32))
+        .map(|u| {
+            (
+                u.prompt_tokens as i32,
+                u.completion_tokens as i32,
+                u.total_tokens as i32,
+            )
+        })
         .unwrap_or((0, 0, 0));
 
     // 将 metadata 序列化为 JSON 字符串
@@ -416,7 +434,7 @@ async fn ensure_conversation_exists(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 检查对话是否存在
     let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
     )
     .bind(conversation_id)
     .bind(user_id)
@@ -434,12 +452,10 @@ async fn ensure_conversation_exists(
         .await?;
     } else {
         // 先确保用户存在（避免外键约束违规）
-        let user_exists: bool = sqlx::query_scalar(
-            "SELECT COUNT(*) > 0 FROM users WHERE id = $1"
-        )
-        .bind(user_id)
-        .fetch_one(db.pool())
-        .await?;
+        let user_exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(db.pool())
+            .await?;
 
         if !user_exists {
             // 创建临时用户记录（将在认证缓存时被更新）
@@ -449,7 +465,7 @@ async fn ensure_conversation_exists(
                 INSERT INTO users (id, username, email, subscription_level, created_at, updated_at)
                 VALUES ($1, $2, $3, 'free', NOW(), NOW())
                 ON CONFLICT (id) DO NOTHING
-                "#
+                "#,
             )
             .bind(user_id)
             .bind(format!("user_{}", user_id))
@@ -463,7 +479,8 @@ async fn ensure_conversation_exists(
             message.chars().take(50).collect::<String>() + "..."
         } else {
             message.to_string()
-        }.replace('\n', " ");
+        }
+        .replace('\n', " ");
 
         sqlx::query(
             r#"

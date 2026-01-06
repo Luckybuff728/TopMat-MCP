@@ -2,9 +2,6 @@
 //!
 //! 提供编译时自动注册MCP工具的宏系统，减少重复代码并提高开发效率
 
-use serde_json::Value as JsonValue;
-use std::collections::HashMap;
-
 /// 自动注册MCP工具的宏
 ///
 /// # 语法
@@ -48,7 +45,7 @@ macro_rules! register_mcp_tools {
                 // 创建工具调用函数
                 let call_fn: $crate::server::mcp::tool_registry::ToolCallFn =
                     std::sync::Arc::new(|args: JsonValue| {
-                        use futures::future::BoxFuture;
+
                         Box::pin(async move {
                             // 反序列化参数
                             let args: $args_type = serde_json::from_value(args)
@@ -87,7 +84,8 @@ macro_rules! register_mcp_tools {
 #[macro_export]
 macro_rules! register_all_mcp_tools {
     ($registry:expr) => {
-        $crate::register_mcp_tools!($registry,
+        $crate::register_mcp_tools!(
+            $registry,
             // ThinkTool {
             //     args_type: ThinkArgs,
             //     constructor: ThinkTool
@@ -130,7 +128,6 @@ macro_rules! register_all_mcp_tools {
                 args_type: ListTasksParams,
                 constructor: ListTasks
             },
-
             // ONNX Service 工具
             // OnnxHealthCheck {
             //     args_type: EmptyParams,
@@ -160,7 +157,6 @@ macro_rules! register_all_mcp_tools {
                 args_type: EmptyParams,
                 constructor: OnnxSayHello
             },
-
             // RAG 知识库检索工具
             SteelRagQuery {
                 args_type: DifyQueryRequest,
@@ -174,7 +170,6 @@ macro_rules! register_all_mcp_tools {
                 args_type: DifyQueryRequest,
                 constructor: AlIdmeWorkflow
             },
-            
             // Phase Field 相场模拟工具
             SubmitSpinodalDecompositionTask {
                 args_type: SpinodalDecompositionRequest,
@@ -274,7 +269,8 @@ mod tests {
         };
 
         // 测试单个工具注册
-        register_mcp_tools!(registry,
+        register_mcp_tools!(
+            registry,
             ThinkTool {
                 args_type: ThinkArgs,
                 constructor: ThinkTool

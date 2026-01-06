@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 
 use axum::{
-    response::{sse::Event, IntoResponse, Response, Sse},
     Json,
+    response::{IntoResponse, Response, Sse, sse::Event},
 };
 use futures_util::StreamExt;
-use tracing::{info, warn, error};
-use rig::completion::Prompt;
 use rig::streaming::StreamingPrompt;
+use tracing::{info, warn};
 
-use crate::server::models::*;
 use crate::server::mcp::McpAgent;
+use crate::server::models::*;
 
 /// 统一的 Agent 包装类型，用于类型擦除 McpAgent 的泛型参数
 pub enum AnyAgent<M>
@@ -22,14 +21,26 @@ where
 }
 
 /// McpAgent 的统一接口 trait
-trait AnyMcpAgent<M: rig::completion::CompletionModel + Send + Sync + 'static>: Send + Sync {
+pub(crate) trait AnyMcpAgent<M: rig::completion::CompletionModel + Send + Sync + 'static>:
+    Send + Sync
+{
     fn inner(&self) -> &rig::agent::Agent<M>;
-    fn handle_streaming(self: Box<Self>, request: ChatRequest)
-        -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(Response, ChatResponse), ErrorResponse>> + Send>>;
+    fn handle_streaming(
+        self: Box<Self>,
+        request: ChatRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<(Response, ChatResponse), ErrorResponse>>
+                + Send,
+        >,
+    >;
 }
 
 /// McpAgent 包装器
-struct McpAgentWrapper<M: rig::completion::CompletionModel + Send + Sync + 'static, C: Send + Sync + 'static> {
+struct McpAgentWrapper<
+    M: rig::completion::CompletionModel + Send + Sync + 'static,
+    C: Send + Sync + 'static,
+> {
     agent: McpAgent<M, C>,
 }
 
@@ -46,7 +57,12 @@ where
     fn handle_streaming(
         self: Box<Self>,
         request: ChatRequest,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(Response, ChatResponse), ErrorResponse>> + Send>> {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<(Response, ChatResponse), ErrorResponse>>
+                + Send,
+        >,
+    > {
         Box::pin(async move {
             let agent_ref = self.agent.inner().clone();
             create_sse_response_for_mcp(self.agent, agent_ref, request).await
@@ -65,9 +81,9 @@ where
         }
     }
 
-    fn is_mcp(&self) -> bool {
-        matches!(self, Self::McpAgent(_))
-    }
+    // fn is_mcp(&self) -> bool {
+    //     matches!(self, Self::McpAgent(_))
+    // }
 }
 
 impl<M> From<rig::agent::Agent<M>> for AnyAgent<M>
@@ -113,10 +129,16 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
     let agent = any_agent.inner_agent().clone();
 
     // 使用 completion_request 获取完整响应（包含 token usage）
-    match agent.model.completion_request(&request.message).send().await {
+    match agent
+        .model
+        .completion_request(&request.message)
+        .send()
+        .await
+    {
         Ok(completion_response) => {
             // 提取响应文本
-            let content = completion_response.choice
+            let content = completion_response
+                .choice
                 .iter()
                 .filter_map(|c| match c {
                     rig::completion::AssistantContent::Text(text) => Some(text.text.clone()),
@@ -124,7 +146,7 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            
+
             // 转换 Usage 到我们的 TokenUsage 格式
             let usage = Some(TokenUsage {
                 prompt_tokens: completion_response.usage.input_tokens as u32,
@@ -136,20 +158,20 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
                 content,
                 model: request.model,
                 usage,
-                conversation_id: request.conversation_id.expect("conversation_id should exist"),
+                conversation_id: request
+                    .conversation_id
+                    .expect("conversation_id should exist"),
                 timestamp: chrono::Local::now(),
                 metadata: HashMap::new(),
             };
             Ok((Json(chat_response.clone()).into_response(), chat_response))
         }
-        Err(e) => {
-            Err(ErrorResponse {
-                error: "chat_failed".to_string(),
-                message: format!("聊天处理失败: {}", e),
-                details: None,
-                timestamp: chrono::Local::now(),
-            })
-        }
+        Err(e) => Err(ErrorResponse {
+            error: "chat_failed".to_string(),
+            message: format!("聊天处理失败: {}", e),
+            details: None,
+            timestamp: chrono::Local::now(),
+        }),
     }
 }
 
@@ -164,17 +186,15 @@ where
     let any_agent = agent.into();
 
     match any_agent {
-        AnyAgent::Agent(agent) => {
-            create_sse_response_for_agent(agent, request).await
-        }
-        AnyAgent::McpAgent(mcp_wrapper) => {
-            mcp_wrapper.handle_streaming(request).await
-        }
+        AnyAgent::Agent(agent) => create_sse_response_for_agent(agent, request).await,
+        AnyAgent::McpAgent(mcp_wrapper) => mcp_wrapper.handle_streaming(request).await,
     }
 }
 
 /// 为普通 Agent 创建 SSE 响应
-async fn create_sse_response_for_agent<M: rig::completion::CompletionModel + Send + Sync + 'static>(
+async fn create_sse_response_for_agent<
+    M: rig::completion::CompletionModel + Send + Sync + 'static,
+>(
     agent: rig::agent::Agent<M>,
     request: ChatRequest,
 ) -> Result<(Response, ChatResponse), ErrorResponse>
@@ -217,7 +237,7 @@ where
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
                     yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
                 }
-                
+
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::Text(text))) => {
                     collected_content.push_str(&text.text);
 
@@ -251,7 +271,7 @@ where
                             total_tokens: usage.total_tokens as u32,
                         }),
                         conversation_id: conversation_id.clone()
-                            .unwrap_or_else(|| crate::server::models::generate_conversation_id()),
+                            .unwrap_or_else(crate::server::models::generate_conversation_id),
                         timestamp: chrono::Local::now(),
                         metadata: HashMap::new(),
                     };
@@ -281,12 +301,11 @@ where
         }
     };
 
-    let sse_response = Sse::new(event_stream)
-        .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(std::time::Duration::from_secs(10))
-                .text("keepalive"),
-        );
+    let sse_response = Sse::new(event_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(10))
+            .text("keepalive"),
+    );
 
     info!("SSE响应已创建");
 
@@ -294,7 +313,9 @@ where
         content: String::new(), // 将通过SSE流填充
         model: request.model,
         usage: None,
-        conversation_id: request.conversation_id.expect("conversation_id should exist"),
+        conversation_id: request
+            .conversation_id
+            .expect("conversation_id should exist"),
         timestamp: chrono::Local::now(),
         metadata: HashMap::new(),
     };
@@ -387,7 +408,7 @@ where
                             total_tokens: usage.total_tokens as u32,
                         }),
                         conversation_id: conversation_id.clone()
-                            .unwrap_or_else(|| crate::server::models::generate_conversation_id()),
+                            .unwrap_or_else(crate::server::models::generate_conversation_id),
                         timestamp: chrono::Local::now(),
                         metadata: HashMap::new(),
                     };
@@ -417,12 +438,11 @@ where
         }
     };
 
-    let sse_response = Sse::new(event_stream)
-        .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(std::time::Duration::from_secs(10))
-                .text("keepalive"),
-        );
+    let sse_response = Sse::new(event_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(10))
+            .text("keepalive"),
+    );
 
     info!("McpAgent: SSE响应已创建");
 
@@ -430,7 +450,9 @@ where
         content: String::new(), // 将通过SSE流填充
         model: request.model,
         usage: None,
-        conversation_id: request.conversation_id.expect("conversation_id should exist"),
+        conversation_id: request
+            .conversation_id
+            .expect("conversation_id should exist"),
         timestamp: chrono::Local::now(),
         metadata: HashMap::new(),
     };

@@ -1,15 +1,15 @@
 use axum::{
+    Extension,
     extract::{Request, State},
-    http::{header, Method, StatusCode},
+    http::Method,
     middleware::Next,
     response::Response,
-    Extension,
 };
-use tracing::{error, warn, debug};
+use tracing::{debug, error, warn};
 
-use crate::server::auth::{AuthClient, extract_api_key};
-use crate::server::models::{ErrorResponse, ApiKeyInfo, UserInfo};
+use crate::server::auth::extract_api_key;
 use crate::server::handlers::chat::ServerState;
+use crate::server::models::ErrorResponse;
 
 /// 认证用户信息
 #[derive(Clone, Debug)]
@@ -68,10 +68,16 @@ impl AuthMiddleware {
             timestamp: chrono::Local::now(),
         })?;
 
-        debug!("提取到API密钥: {}...", &api_key[..std::cmp::min(4, api_key.len())]);
+        debug!(
+            "提取到API密钥: {}...",
+            &api_key[..std::cmp::min(4, api_key.len())]
+        );
 
         // 验证API密钥
-        let auth_result = state.auth_client.verify_api_key(&api_key).await
+        let auth_result = state
+            .auth_client
+            .verify_api_key(&api_key)
+            .await
             .map_err(|e| {
                 error!("API密钥验证失败: {}", e);
                 ErrorResponse {
@@ -96,33 +102,31 @@ impl AuthMiddleware {
         }
 
         // 检查API密钥是否过期
-        if let Some(expires_str) = &auth_result.api_key_info.expires_at {
-            if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_str) {
-                if expires_at < chrono::Local::now() {
-                    warn!("API密钥已过期: {}", api_key);
-                    return Err(ErrorResponse {
-                        error: "expired_api_key".to_string(),
-                        message: "API密钥已过期".to_string(),
-                        details: None,
-                        timestamp: chrono::Local::now(),
-                    });
-                }
-            }
+        if let Some(expires_str) = &auth_result.api_key_info.expires_at
+            && let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_str)
+            && expires_at < chrono::Local::now()
+        {
+            warn!("API密钥已过期: {}", api_key);
+            return Err(ErrorResponse {
+                error: "expired_api_key".to_string(),
+                message: "API密钥已过期".to_string(),
+                details: None,
+                timestamp: chrono::Local::now(),
+            });
         }
 
         // 检查用户订阅是否过期
-        if let Some(sub_expires_str) = &auth_result.user_info.subscription_expires_at {
-            if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(sub_expires_str) {
-                if expires_at < chrono::Local::now() {
-                    warn!("用户订阅已过期: user_id={}", auth_result.user_info.id);
-                    return Err(ErrorResponse {
-                        error: "subscription_expired".to_string(),
-                        message: "用户订阅已过期".to_string(),
-                        details: None,
-                        timestamp: chrono::Local::now(),
-                    });
-                }
-            }
+        if let Some(sub_expires_str) = &auth_result.user_info.subscription_expires_at
+            && let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(sub_expires_str)
+            && expires_at < chrono::Local::now()
+        {
+            warn!("用户订阅已过期: user_id={}", auth_result.user_info.id);
+            return Err(ErrorResponse {
+                error: "subscription_expired".to_string(),
+                message: "用户订阅已过期".to_string(),
+                details: None,
+                timestamp: chrono::Local::now(),
+            });
         }
 
         // 创建认证用户信息
@@ -134,8 +138,10 @@ impl AuthMiddleware {
             api_key: auth_result.api_key_info.api_key.clone(),
         };
 
-        debug!("用户认证成功: user_id={}, username={}, subscription_level={}",
-              auth_user.user_id, auth_user.username, auth_user.subscription_level);
+        debug!(
+            "用户认证成功: user_id={}, username={}, subscription_level={}",
+            auth_user.user_id, auth_user.username, auth_user.subscription_level
+        );
 
         // 将用户信息注入到请求扩展中
         let mut request = request;
@@ -150,13 +156,12 @@ impl AuthMiddleware {
             auth_user.user_id.to_string().parse().unwrap_or_else(|_| {
                 warn!("Failed to parse user ID as header value");
                 axum::http::HeaderValue::from_static("1")
-            })
+            }),
         );
 
         Ok(response)
     }
-
-  }
+}
 
 /// 用于从请求扩展中提取认证用户信息的trait
 pub trait AuthExtractor {
@@ -173,28 +178,28 @@ impl AuthExtractor for Extension<AuthUser> {
 #[macro_export]
 macro_rules! get_auth_user {
     ($extensions:expr) => {
-        $extensions.get::<AuthUser>().ok_or_else(|| {
-            crate::server::models::ErrorResponse {
+        $extensions
+            .get::<AuthUser>()
+            .ok_or_else(|| $crate::server::models::ErrorResponse {
                 error: "authentication_required".to_string(),
                 message: "需要认证".to_string(),
                 details: None,
                 timestamp: chrono::Local::now(),
-            }
-        })
+            })
     };
 }
 
-/// 检查用户订阅级别的便捷函数
-pub fn check_subscription_level(user: &AuthUser, required_level: &str) -> bool {
-    match (user.subscription_level.as_str(), required_level) {
-        // Pro用户可以访问所有功能
-        ("pro", _) => true,
-        // Basic用户只能访问basic级别及以下
-        ("basic", "basic") => true,
-        // 其他情况需要精确匹配
-        (user_level, required) => user_level == required,
-    }
-}
+// /// 检查用户订阅级别的便捷函数
+// pub fn check_subscription_level(user: &AuthUser, required_level: &str) -> bool {
+//     match (user.subscription_level.as_str(), required_level) {
+//         // Pro用户可以访问所有功能
+//         ("pro", _) => true,
+//         // Basic用户只能访问basic级别及以下
+//         ("basic", "basic") => true,
+//         // 其他情况需要精确匹配
+//         (user_level, required) => user_level == required,
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -241,29 +246,5 @@ mod tests {
 
         let result = extract_api_key(&request);
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_check_subscription_level() {
-        let pro_user = AuthUser {
-            user_id: 1,
-            username: "pro_user".to_string(),
-            email: "pro@example.com".to_string(),
-            subscription_level: "pro".to_string(),
-            api_key: "test-key".to_string(),
-        };
-
-        let basic_user = AuthUser {
-            user_id: 2,
-            username: "basic_user".to_string(),
-            email: "basic@example.com".to_string(),
-            subscription_level: "basic".to_string(),
-            api_key: "test-key".to_string(),
-        };
-
-        assert!(check_subscription_level(&pro_user, "pro"));
-        assert!(check_subscription_level(&pro_user, "basic"));
-        assert!(check_subscription_level(&basic_user, "basic"));
-        assert!(!check_subscription_level(&basic_user, "pro"));
     }
 }

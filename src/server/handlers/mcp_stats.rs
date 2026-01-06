@@ -3,21 +3,18 @@
 //! 提供MCP工具调用和会话数据的统计查询API
 
 use axum::{
-    extract::{Query, State, Extension},
+    extract::{Extension, Query, State},
     response::Json,
-    http::StatusCode,
 };
-use serde::{Deserialize, Serialize};
-use tracing::info;
 use sqlx::Row;
-use utoipa::path;
-use serde_json::json;
 
 use crate::server::{
-    database::DatabaseConnection,
     handlers::chat::ServerState,
     middleware::auth::AuthUser,
-    models::{ErrorResponse, McpStatsQuery, McpUsageStats, McpSessionInfo, McpToolCallInfo, ComprehensiveStats},
+    models::{
+        ComprehensiveStats, ErrorResponse, McpSessionInfo, McpStatsQuery, McpToolCallInfo,
+        McpUsageStats,
+    },
 };
 
 /// 获取MCP使用统计汇总
@@ -57,41 +54,39 @@ use crate::server::{
 pub async fn get_mcp_usage_stats_handler(
     State(state): State<ServerState>,
     Extension(auth_user): Extension<AuthUser>,
-    Query(params): Query<McpStatsQuery>,
+    Query(_params): Query<McpStatsQuery>,
 ) -> Result<Json<McpUsageStats>, ErrorResponse> {
     let user_id = auth_user.user_id as i64;
 
     // 获取会话统计
-    let total_sessions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mcp_sessions WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(state.database.pool())
-    .await
-    .map_err(|e| ErrorResponse {
-        error: "database_error".to_string(),
-        message: "查询会话统计失败".to_string(),
-        details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Local::now(),
-    })?;
+    let total_sessions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mcp_sessions WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(state.database.pool())
+            .await
+            .map_err(|e| ErrorResponse {
+                error: "database_error".to_string(),
+                message: "查询会话统计失败".to_string(),
+                details: Some(serde_json::json!({ "error": e.to_string() })),
+                timestamp: chrono::Local::now(),
+            })?;
 
     // 获取工具调用统计
-    let total_tool_calls: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(state.database.pool())
-    .await
-    .map_err(|e| ErrorResponse {
-        error: "database_error".to_string(),
-        message: "查询工具调用统计失败".to_string(),
-        details: Some(serde_json::json!({ "error": e.to_string() })),
-        timestamp: chrono::Local::now(),
-    })?;
+    let total_tool_calls: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(state.database.pool())
+            .await
+            .map_err(|e| ErrorResponse {
+                error: "database_error".to_string(),
+                message: "查询工具调用统计失败".to_string(),
+                details: Some(serde_json::json!({ "error": e.to_string() })),
+                timestamp: chrono::Local::now(),
+            })?;
 
     // 获取成功调用数量
     let success_calls: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = $1 AND status = 'success'"
+        "SELECT COUNT(*) FROM mcp_tool_calls WHERE user_id = $1 AND status = 'success'",
     )
     .bind(user_id)
     .fetch_one(state.database.pool())
@@ -198,7 +193,7 @@ pub async fn get_mcp_sessions_handler(
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
     let user_id = auth_user.user_id as i64;
     let page = params.page.unwrap_or(1).max(1);
-    let limit = params.limit.unwrap_or(20).min(100).max(1);
+    let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * limit;
 
     // 构建查询条件
@@ -242,17 +237,20 @@ pub async fn get_mcp_sessions_handler(
     for row in sessions {
         let session_id: String = row.try_get("session_id").unwrap_or_default();
         let transport_type: String = row.try_get("transport_type").unwrap_or_default();
-        let created_at: chrono::DateTime<chrono::Local> = row.try_get("created_at").unwrap_or_else(|_| chrono::Local::now());
-        let last_activity_at: chrono::DateTime<chrono::Local> = row.try_get("last_activity_at").unwrap_or_else(|_| chrono::Local::now());
+        let created_at: chrono::DateTime<chrono::Local> = row
+            .try_get("created_at")
+            .unwrap_or_else(|_| chrono::Local::now());
+        let last_activity_at: chrono::DateTime<chrono::Local> = row
+            .try_get("last_activity_at")
+            .unwrap_or_else(|_| chrono::Local::now());
 
         // 获取每个会话的工具调用数量
-        let tool_calls_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM mcp_tool_calls WHERE session_id = $1"
-        )
-        .bind(&session_id)
-        .fetch_one(state.database.pool())
-        .await
-        .unwrap_or(0);
+        let tool_calls_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM mcp_tool_calls WHERE session_id = $1")
+                .bind(&session_id)
+                .fetch_one(state.database.pool())
+                .await
+                .unwrap_or(0);
 
         session_list.push(McpSessionInfo {
             session_id,
@@ -322,7 +320,7 @@ pub async fn get_mcp_tool_calls_handler(
 ) -> Result<Json<serde_json::Value>, ErrorResponse> {
     let user_id = auth_user.user_id as i64;
     let page = params.page.unwrap_or(1).max(1);
-    let limit = params.limit.unwrap_or(20).min(100).max(1);
+    let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * limit;
 
     // 构建查询条件
@@ -377,7 +375,9 @@ pub async fn get_mcp_tool_calls_handler(
             transport_type: row.try_get("transport_type").unwrap_or_default(),
             endpoint: row.try_get("endpoint").unwrap_or_default(),
             execution_time_ms: row.try_get("execution_time_ms").ok(),
-            created_at: row.try_get("created_at").unwrap_or_else(|_| chrono::Local::now()),
+            created_at: row
+                .try_get("created_at")
+                .unwrap_or_else(|_| chrono::Local::now()),
         });
     }
 
@@ -447,17 +447,17 @@ pub async fn get_comprehensive_stats_handler(
         State(state.clone()),
         Extension(auth_user.clone()),
         Query(params.clone()),
-    ).await?;
+    )
+    .await?;
     let mcp_data = mcp_stats.0;
 
     // 获取聊天统计（简化版本）
-    let total_conversations: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM conversations WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(state.database.pool())
-    .await
-    .unwrap_or(0);
+    let total_conversations: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM conversations WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(state.database.pool())
+            .await
+            .unwrap_or(0);
 
     let total_messages: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM messages WHERE conversation_id IN (SELECT conversation_id FROM conversations WHERE user_id = $1)"
@@ -477,6 +477,6 @@ pub async fn get_comprehensive_stats_handler(
             "total_requests": total_conversations + mcp_data.total_tool_calls,
             "active_sessions": total_conversations + mcp_data.total_sessions,
             "data_points": total_messages + mcp_data.total_tool_calls
-        })
+        }),
     }))
 }

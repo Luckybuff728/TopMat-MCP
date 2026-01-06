@@ -1,11 +1,10 @@
 use axum::{
     extract::Request,
-    http::{header, StatusCode},
-    response::{Response, IntoResponse},
+    response::{IntoResponse, Response},
 };
 use tracing::{debug, warn};
 
-use crate::server::models::{ErrorResponse, AuthError, AuthResult, ApiKeyInfo, UserInfo};
+use crate::server::models::{AuthError, AuthResult, ErrorResponse};
 
 /// 从请求中提取API Key
 pub fn extract_api_key(request: &Request) -> Option<String> {
@@ -16,12 +15,11 @@ pub fn extract_api_key_from_headers(headers: &axum::http::HeaderMap) -> Option<S
     use axum::http::header;
 
     // 从Authorization header中提取Bearer token
-    if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
-        if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.to_lowercase().starts_with("bearer ") {
-                return Some(auth_str[7..].to_string());
-            }
-        }
+    if let Some(auth_header) = headers.get(header::AUTHORIZATION)
+        && let Ok(auth_str) = auth_header.to_str()
+        && auth_str.to_lowercase().starts_with("bearer ")
+    {
+        return Some(auth_str[7..].to_string());
     }
 
     None
@@ -80,7 +78,8 @@ pub fn create_missing_api_key_response() -> ErrorResponse {
     }
 }
 
-/// 验证API Key并返回AuthResult的通用函数
+// 验证API Key并返回AuthResult的通用函数
+#[allow(dead_code)]
 pub async fn verify_api_key_from_request(
     request: &Request,
     auth_client: &super::AuthClient,
