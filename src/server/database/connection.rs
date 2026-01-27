@@ -28,6 +28,77 @@ impl DatabaseConnection {
     //         }
     //     }
     // }
+
+    /// 获取对话历史消息
+    pub async fn get_conversation_history(
+        &self,
+        conversation_id: &str,
+        limit: i64,
+    ) -> Result<Vec<crate::server::models::Message>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT message_id, conversation_id, role, content, model, created_at,
+                   prompt_tokens, completion_tokens, total_tokens, metadata
+            FROM messages
+            WHERE conversation_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(conversation_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut messages: Vec<crate::server::models::Message> = rows
+            .into_iter()
+            .map(|row| {
+                use sqlx::Row;
+                let prompt_tokens: i32 = row
+                    .try_get::<Option<i32>, _>("prompt_tokens")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let completion_tokens: i32 = row
+                    .try_get::<Option<i32>, _>("completion_tokens")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let total_tokens: i32 = row
+                    .try_get::<Option<i32>, _>("total_tokens")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
+                let metadata_str: Option<String> =
+                    row.try_get::<Option<String>, _>("metadata").ok().flatten();
+                let metadata = metadata_str.and_then(|s| serde_json::from_str(&s).ok());
+
+                crate::server::models::Message {
+                    id: Some(row.try_get::<i64, _>("message_id").unwrap_or(0) as i32),
+                    conversation_id: row
+                        .try_get::<String, _>("conversation_id")
+                        .unwrap_or_default(),
+                    role: row.try_get::<String, _>("role").unwrap_or_default(),
+                    content: row.try_get::<String, _>("content").unwrap_or_default(),
+                    model: row.try_get::<Option<String>, _>("model").ok().flatten(),
+                    usage: Some(crate::server::models::TokenUsage {
+                        prompt_tokens: prompt_tokens as u32,
+                        completion_tokens: completion_tokens as u32,
+                        total_tokens: total_tokens as u32,
+                    }),
+                    metadata,
+                    created_at: row
+                        .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+                        .unwrap_or_else(|_| chrono::Local::now()),
+                }
+            })
+            .collect();
+
+        // 按时间正序排列回复给模型
+        messages.reverse();
+        Ok(messages)
+    }
 }
 
 /// 初始化数据库连接

@@ -1,12 +1,14 @@
-use rig::prelude::*;
-
+use super::history::HistoryManager;
+use crate::server::database::DatabaseConnection;
 use crate::server::models::*;
 use crate::server::request::handle_chat_request;
+use rig::prelude::*;
 
 /// 处理Ollama请求并返回ChatResponse (ollama-qwen3-4b)
 pub async fn ollama_qwen3_4b(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: crate::server::middleware::auth::AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: crate::server::middleware::auth::AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
@@ -16,13 +18,20 @@ pub async fn ollama_qwen3_4b(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 /// 处理Ollama请求并返回ChatResponse (ollama-llama3)
 pub async fn ollama_llama3(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: crate::server::middleware::auth::AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: crate::server::middleware::auth::AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
@@ -32,7 +41,13 @@ pub async fn ollama_llama3(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 // use anyhow::Result;

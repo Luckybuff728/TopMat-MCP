@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response, Sse, sse::Event},
 };
 use futures_util::StreamExt;
-use rig::streaming::StreamingPrompt;
+use rig::streaming::{StreamingChat, StreamingPrompt};
 use tracing::{info, warn};
 
 use crate::server::mcp::McpAgent;
@@ -28,6 +28,7 @@ pub(crate) trait AnyMcpAgent<M: rig::completion::CompletionModel + Send + Sync +
     fn handle_streaming(
         self: Box<Self>,
         request: ChatRequest,
+        history: Option<Vec<rig::message::Message>>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<(Response, ChatResponse), ErrorResponse>>
@@ -57,6 +58,7 @@ where
     fn handle_streaming(
         self: Box<Self>,
         request: ChatRequest,
+        history: Option<Vec<rig::message::Message>>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<(Response, ChatResponse), ErrorResponse>>
@@ -65,7 +67,7 @@ where
     > {
         Box::pin(async move {
             let agent_ref = self.agent.inner().clone();
-            create_sse_response_for_mcp(self.agent, agent_ref, request).await
+            create_sse_response_for_mcp(self.agent, agent_ref, request, history).await
         })
     }
 }
@@ -109,14 +111,15 @@ where
 pub async fn handle_chat_request<M: rig::completion::CompletionModel + Send + Sync + 'static>(
     agent: impl Into<AnyAgent<M>>,
     request: ChatRequest,
+    history: Option<Vec<rig::message::Message>>,
 ) -> Result<(Response, ChatResponse), ErrorResponse>
 where
     <M as rig::completion::CompletionModel>::StreamingResponse: Send + Sync + 'static,
 {
     if request.stream {
-        handle_streaming_request(agent, request).await
+        handle_streaming_request(agent, request, history).await
     } else {
-        handle_normal_request(agent, request).await
+        handle_normal_request(agent, request, history).await
     }
 }
 
@@ -124,17 +127,20 @@ where
 pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + Sync + 'static>(
     agent: impl Into<AnyAgent<M>>,
     request: ChatRequest,
+    history: Option<Vec<rig::message::Message>>,
 ) -> Result<(Response, ChatResponse), ErrorResponse> {
     let any_agent = agent.into();
     let agent = any_agent.inner_agent().clone();
 
     // 使用 completion_request 获取完整响应（包含 token usage）
-    match agent
-        .model
-        .completion_request(&request.message)
-        .send()
-        .await
-    {
+    let mut completion_request = agent.model.completion_request(&request.message);
+
+    // 如果有历史消息，添加到请求中
+    if let Some(history) = history {
+        completion_request = completion_request.messages(history);
+    }
+
+    match completion_request.send().await {
         Ok(completion_response) => {
             // 提取响应文本
             let content = completion_response
@@ -179,6 +185,7 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
 pub async fn handle_streaming_request<M: rig::completion::CompletionModel + Send + Sync + 'static>(
     agent: impl Into<AnyAgent<M>>,
     request: ChatRequest,
+    history: Option<Vec<rig::message::Message>>,
 ) -> Result<(Response, ChatResponse), ErrorResponse>
 where
     <M as rig::completion::CompletionModel>::StreamingResponse: Send + Sync + 'static,
@@ -186,8 +193,8 @@ where
     let any_agent = agent.into();
 
     match any_agent {
-        AnyAgent::Agent(agent) => create_sse_response_for_agent(agent, request).await,
-        AnyAgent::McpAgent(mcp_wrapper) => mcp_wrapper.handle_streaming(request).await,
+        AnyAgent::Agent(agent) => create_sse_response_for_agent(agent, request, history).await,
+        AnyAgent::McpAgent(mcp_wrapper) => mcp_wrapper.handle_streaming(request, history).await,
     }
 }
 
@@ -197,11 +204,19 @@ async fn create_sse_response_for_agent<
 >(
     agent: rig::agent::Agent<M>,
     request: ChatRequest,
+    history: Option<Vec<rig::message::Message>>,
 ) -> Result<(Response, ChatResponse), ErrorResponse>
 where
     <M as rig::completion::CompletionModel>::StreamingResponse: Send + Sync + 'static,
 {
-    let mut stream = agent.stream_prompt(&request.message).multi_turn(20).await;
+    let mut stream = if let Some(history) = history {
+        agent
+            .stream_chat(&request.message, history)
+            .multi_turn(20)
+            .await
+    } else {
+        agent.stream_prompt(&request.message).multi_turn(20).await
+    };
     let mut final_response: Option<rig::agent::FinalResponse> = None;
     let mut collected_content = String::new();
     let mut stream_items_processed = 0;
@@ -328,13 +343,21 @@ async fn create_sse_response_for_mcp<M, C>(
     mcp_agent: McpAgent<M, C>,
     agent: rig::agent::Agent<M>,
     request: ChatRequest,
+    history: Option<Vec<rig::message::Message>>,
 ) -> Result<(Response, ChatResponse), ErrorResponse>
 where
     M: rig::completion::CompletionModel + Send + Sync + 'static,
     C: Send + Sync + 'static,
     <M as rig::completion::CompletionModel>::StreamingResponse: Send + Sync + 'static,
 {
-    let mut stream = agent.stream_prompt(&request.message).multi_turn(20).await;
+    let mut stream = if let Some(history) = history {
+        agent
+            .stream_chat(&request.message, history)
+            .multi_turn(20)
+            .await
+    } else {
+        agent.stream_prompt(&request.message).multi_turn(20).await
+    };
     let mut final_response: Option<rig::agent::FinalResponse> = None;
     let mut collected_content = String::new();
     let mut stream_items_processed = 0;

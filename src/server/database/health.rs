@@ -1,7 +1,7 @@
 // use crate::server::database::DatabaseConnection;
 use crate::server::models::ServiceStatus;
-use std::time::Instant;
-use tracing::{error, info, warn};
+// use std::time::Instant;
+use tracing::{error, info};
 
 // 检查数据库连接健康状态
 // #[allow(dead_code)]

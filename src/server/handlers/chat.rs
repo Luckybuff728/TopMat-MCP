@@ -102,7 +102,7 @@ pub async fn chat_handler(
     // conversation_id 已由 MessageStorage 中间件确保存在
     // 消息保存也由 MessageStorage 中间件自动处理
     let (response, _chat_response) = crate::server::model_router::get_model_router()
-        .handle_chat_request_with_response(request.clone(), auth_user)
+        .handle_chat_request_with_response(_state.database.clone(), request.clone(), auth_user)
         .await?;
 
     Ok(response)

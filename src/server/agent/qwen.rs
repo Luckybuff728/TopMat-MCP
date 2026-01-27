@@ -1,3 +1,5 @@
+use super::history::HistoryManager;
+use crate::server::database::DatabaseConnection;
 use crate::server::middleware::auth::AuthUser;
 use crate::server::models::*;
 use crate::server::request::handle_chat_request;
@@ -5,8 +7,9 @@ use rig::client::CompletionClient;
 
 /// 处理通义千问请求并返回ChatResponse (qwen-plus)
 pub async fn qwen_plus(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let model = &request.model;
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
@@ -18,13 +21,20 @@ pub async fn qwen_plus(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 /// 处理通义千问请求并返回ChatResponse (qwen-turbo)
 pub async fn qwen_turbo(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
@@ -35,13 +45,20 @@ pub async fn qwen_turbo(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 /// 处理通义千问请求并返回ChatResponse (qwen-max)
 pub async fn qwen_max(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
@@ -52,11 +69,18 @@ pub async fn qwen_max(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 // 处理通义千问请求并返回ChatResponse (qwen-flash)
 pub async fn qwen_flash(
+    db: DatabaseConnection,
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
@@ -69,13 +93,20 @@ pub async fn qwen_flash(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 /// 处理通义千问请求并返回ChatResponse (qwq-plus)
 pub async fn qwq_plus(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
@@ -86,10 +117,17 @@ pub async fn qwq_plus(
         .temperature(temperature as f64)
         .build();
 
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 pub async fn calphamesh(
+    db: DatabaseConnection,
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
@@ -100,7 +138,7 @@ pub async fn calphamesh(
         "你是一个专业的材料热力学计算助手，专门负责 CalphaMesh 模拟任务的管理。
 你的主要职责包括：
 1. **任务提交**：辅助用户提交点计算 (SubmitPointTask)、线计算 (SubmitLineTask) 和 Scheil 凝固模拟 (SubmitScheilTask)。请确保用户提供的组分 (composition) 总和为 1。
-2. **状态追踪**：使用 GetTaskStatus 查询特定任务的进度和结果。
+2. **状态追踪**：使用 GetTaskStatus 查询特定任务的进度 and 结果。
 3. **任务管理**：使用 ListTasks 列出用户的所有模拟任务。
 4. **密钥**：当调用任何 calphamesh 工具时，**必须**在参数中包含 'api_key' 字段,值为：{}。
 请为用户提供准确的计算建议，在调用工具前验证参数的合理性，并以专业、简洁的方式反馈模拟结果。",
@@ -118,10 +156,18 @@ pub async fn calphamesh(
         .tool(crate::server::mcp::tools::ListTasks);
 
     let raw_agent = agent_builder.build();
-    handle_chat_request(raw_agent, request).await
+
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(raw_agent, request, history).await
 }
 
 pub async fn phase_field(
+    db: DatabaseConnection,
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
@@ -152,10 +198,17 @@ pub async fn phase_field(
         .build();
 
     // let raw_agent = agent_builder.build();
-    handle_chat_request(agent, request).await
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(agent, request, history).await
 }
 
 pub async fn ml_server(
+    db: DatabaseConnection,
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
@@ -177,11 +230,18 @@ pub async fn ml_server(
         .tool(crate::server::mcp::tools::OnnxModelInference);
 
     let raw_agent = agent_builder.build();
-    handle_chat_request(raw_agent, request).await
+
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(raw_agent, request, history).await
 }
 
-
 pub async fn battery(
+    db: DatabaseConnection,
     request: ChatRequest,
     _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
@@ -207,7 +267,14 @@ pub async fn battery(
         .tool(crate::server::mcp::tools::GetSimulationResult);
 
     let raw_agent = agent_builder.build();
-    handle_chat_request(raw_agent, request).await
+
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
+
+    handle_chat_request(raw_agent, request, history).await
 }
 
 // pub async fn qwen_flash(

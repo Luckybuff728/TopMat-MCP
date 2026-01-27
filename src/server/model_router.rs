@@ -10,6 +10,7 @@ pub struct ModelRouter {
 
 /// 处理器函数类型，返回(Response, ChatResponse)
 type HandlerFn = fn(
+    crate::server::database::DatabaseConnection,
     ChatRequest,
     crate::server::middleware::auth::AuthUser,
 ) -> std::pin::Pin<
@@ -28,45 +29,47 @@ impl ModelRouter {
         };
 
         // 注册通义千问模型
-        router.register("qwen-plus", |req, auth_user| {
-            Box::pin(qwen::qwen_plus(req, auth_user))
+        router.register("qwen-plus", |db, req, auth_user| {
+            Box::pin(qwen::qwen_plus(db, req, auth_user))
         });
-        router.register("qwen-turbo", |req, auth_user| {
-            Box::pin(qwen::qwen_turbo(req, auth_user))
+        router.register("qwen-turbo", |db, req, auth_user| {
+            Box::pin(qwen::qwen_turbo(db, req, auth_user))
         });
-        router.register("qwen-max", |req, auth_user| {
-            Box::pin(qwen::qwen_max(req, auth_user))
+        router.register("qwen-max", |db, req, auth_user| {
+            Box::pin(qwen::qwen_max(db, req, auth_user))
         });
-        router.register("qwen-flash", |req, auth_user| {
-            Box::pin(qwen::qwen_flash(req, auth_user))
+        router.register("qwen-flash", |db, req, auth_user| {
+            Box::pin(qwen::qwen_flash(db, req, auth_user))
         });
-        router.register("qwq-plus", |req, auth_user| {
-            Box::pin(qwen::qwq_plus(req, auth_user))
+        router.register("qwq-plus", |db, req, auth_user| {
+            Box::pin(qwen::qwq_plus(db, req, auth_user))
         });
 
         // 注册Ollama模型
-        router.register("ollama-qwen3-4b", |req, auth_user| {
-            Box::pin(ollama::ollama_qwen3_4b(req, auth_user))
+        router.register("ollama-qwen3-4b", |db, req, auth_user| {
+            Box::pin(ollama::ollama_qwen3_4b(db, req, auth_user))
         });
-        router.register("ollama-llama3", |req, auth_user| {
-            Box::pin(ollama::ollama_llama3(req, auth_user))
+        router.register("ollama-llama3", |db, req, auth_user| {
+            Box::pin(ollama::ollama_llama3(db, req, auth_user))
         });
         // 注册带工具的模型
-        router.register("calphamesh", |req, auth_user| {
-            Box::pin(qwen::calphamesh(req, auth_user))
+        router.register("calphamesh", |db, req, auth_user| {
+            Box::pin(qwen::calphamesh(db, req, auth_user))
         });
-        router.register("phase-field", |req, auth_user| {
-            Box::pin(qwen::phase_field(req, auth_user))
+        router.register("phase-field", |db, req, auth_user| {
+            Box::pin(qwen::phase_field(db, req, auth_user))
         });
-        router.register("ml-server", |req, auth_user| {
-            Box::pin(qwen::ml_server(req, auth_user))
+        router.register("ml-server", |db, req, auth_user| {
+            Box::pin(qwen::ml_server(db, req, auth_user))
         });
 
-        router.register("coating", |req, auth_user| {
-            Box::pin(coating_optimization::coating_optimization(req, auth_user))
+        router.register("coating", |db, req, auth_user| {
+            Box::pin(coating_optimization::coating_optimization(
+                db, req, auth_user,
+            ))
         });
-        router.register("battery", |req, auth_user| {
-            Box::pin(qwen::battery(req, auth_user))
+        router.register("battery", |db, req, auth_user| {
+            Box::pin(qwen::battery(db, req, auth_user))
         });
         router
     }
@@ -79,6 +82,7 @@ impl ModelRouter {
     /// 处理聊天请求并返回ChatResponse用于保存助手消息
     pub async fn handle_chat_request_with_response(
         &self,
+        db: crate::server::database::DatabaseConnection,
         request: ChatRequest,
         auth_user: crate::server::middleware::auth::AuthUser,
     ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
@@ -94,7 +98,7 @@ impl ModelRouter {
                 timestamp: chrono::Local::now(),
             })?;
 
-        handler(request, auth_user).await
+        handler(db, request, auth_user).await
     }
 
     /// 获取所有可用模型

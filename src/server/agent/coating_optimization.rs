@@ -14,6 +14,8 @@
 //! 这个版本使用手动编排方式，而不是 agent-as-tool 模式，
 //! 这样可以确保每个子 agent 的响应都能流式输出，提供更好的用户体验。
 
+use super::history::HistoryManager;
+use crate::server::database::DatabaseConnection;
 use crate::server::middleware::auth::AuthUser;
 use crate::server::models::{ChatRequest, ChatResponse, ErrorResponse};
 use crate::server::request::handle_chat_request;
@@ -22,8 +24,9 @@ use rig::prelude::*;
 // ============= 错误类型定义 =============
 
 pub async fn coating_optimization(
+    db: DatabaseConnection,
     request: ChatRequest,
-    _auth_user: AuthUser, // 目前暂不使用，但为了统一接口
+    _auth_user: AuthUser,
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
@@ -118,19 +121,24 @@ pub async fn coating_optimization(
         .build();
 
     // ============= 手动编排流程（支持流式输出） =============
+    let history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db).get_context(cvid).await.ok()
+    } else {
+        None
+    };
 
-    let _ = handle_chat_request(requirement_agent, request.clone()).await;
+    let _ = handle_chat_request(requirement_agent, request.clone(), history.clone()).await;
     // 【阶段二：性能预测】
-    let _ = handle_chat_request(prediction_agent, request.clone()).await;
+    let _ = handle_chat_request(prediction_agent, request.clone(), history.clone()).await;
     // 【阶段三：优化建议】
-    let _ = handle_chat_request(composition_optimizer, request.clone()).await;
+    let _ = handle_chat_request(composition_optimizer, request.clone(), history.clone()).await;
     // P2: 结构优化
     println!("\n--- P2: 结构优化 ---\n");
-    let _ = handle_chat_request(structure_optimizer, request.clone()).await;
+    let _ = handle_chat_request(structure_optimizer, request.clone(), history.clone()).await;
     // P3: 工艺优化
 
-    let _ = handle_chat_request(process_optimizer, request.clone()).await;
+    let _ = handle_chat_request(process_optimizer, request.clone(), history.clone()).await;
     // 【阶段四：迭代优化】
 
-    handle_chat_request(iteration_agent, request).await
+    handle_chat_request(iteration_agent, request, history).await
 }
