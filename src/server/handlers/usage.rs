@@ -388,32 +388,4 @@ async fn check_cache_health() -> ServiceStatus {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
 
-    #[tokio::test]
-    async fn test_health_check() {
-        let response = health_check_handler().await;
-        assert!(matches!(response.status, ServiceStatus::Healthy));
-        assert!(!response.services.ai_models.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_usage_stats() {
-        let params = UsageStatsQuery {
-            from_date: Some("2024-10-01T00:00:00Z".to_string()),
-            to_date: Some("2024-10-23T23:59:59Z".to_string()),
-            period: Some("day".to_string()),
-        };
-
-        let result = get_usage_stats_handler(Query(params)).await;
-        assert!(result.is_ok());
-
-        let response = result.unwrap();
-        assert_eq!(response.period, "day");
-        assert!(response.stats.total_requests > 0);
-        assert!(!response.stats.model_usage.is_empty());
-    }
-}

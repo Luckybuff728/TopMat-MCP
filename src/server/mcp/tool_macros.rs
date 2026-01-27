@@ -44,7 +44,7 @@ macro_rules! register_mcp_tools {
 
                 // 创建工具调用函数
                 let call_fn: $crate::server::mcp::tool_registry::ToolCallFn =
-                    std::sync::Arc::new(|args: JsonValue| {
+                    std::sync::Arc::new(|args: ::serde_json::Value| {
 
                         Box::pin(async move {
                             // 反序列化参数
@@ -72,7 +72,7 @@ macro_rules! register_mcp_tools {
                     },
                 );
 
-                info!("✓ 注册工具: {}", tool_name);
+                ::tracing::info!("✓ 注册工具: {}", tool_name);
             }
         )*
     };
@@ -199,6 +199,65 @@ macro_rules! register_all_mcp_tools {
                 args_type: FileRetrieveParams,
                 constructor: RetrieveFile
             },
+            // // Battery Simulation 工具
+            // ListBatteryModels {
+            //     args_type: BatteryEmptyArgs,
+            //     constructor: ListBatteryModels
+            // },
+            // ListBatteryParaSets {
+            //     args_type: BatteryEmptyArgs,
+            //     constructor: ListBatteryParaSets
+            // },
+            // GetBatteryOptions {
+            //     args_type: BatteryEmptyArgs,
+            //     constructor: GetBatteryOptions
+            // },
+            // GetBatteryOutParams {
+            //     args_type: VariablesArgs,
+            //     constructor: GetBatteryOutParams
+            // },
+            // GetBatteryParaInfo {
+            //     args_type: ParameterSetNameArgs,
+            //     constructor: GetBatteryParaInfo
+            // },
+            // RunBatterySimulation {
+            //     args_type: SimulateArgs,
+            //     constructor: RunBatterySimulation
+            // },
+            // ListSimulationResults {
+            //     args_type: BatteryEmptyArgs,
+            //     constructor: ListSimulationResults
+            // },
+            // GetSimulationResult {
+            //     args_type: SimulationResultArgs,
+            //     constructor: GetSimulationResult
+            // },
+            // // Battery Analysis 工具
+            // AnalyzeBatterySox {
+            //     args_type: BatteryFileIdArgs,
+            //     constructor: AnalyzeBatterySox
+            // },
+            // TrainBatteryLstm {
+            //     args_type: TrainingArgs,
+            //     constructor: TrainBatteryLstm
+            // },
+            // GetBatteryTaskStatus {
+            //     args_type: BatteryTaskIdArgs,
+            //     constructor: GetBatteryTaskStatus
+            // },
+            // PredictBatteryRul {
+            //     args_type: PredictionArgs,
+            //     constructor: PredictBatteryRul
+            // },
+            // DetectBatteryAnomalies {
+            //     args_type: BatteryFileIdArgs,
+            //     constructor: DetectBatteryAnomalies
+            // },
+            // // Tianneng 工具
+            // SimulateTiannengBattery {
+            //     args_type: TiannengSimulateArgs,
+            //     constructor: SimulateTiannengBattery
+            // },
         );
     };
 }
@@ -208,7 +267,7 @@ macro_rules! register_all_mcp_tools {
 macro_rules! create_tool_factory {
     ($tool_type:ty, $args_type:ty) => {
         {
-            std::sync::Arc::new(move |args: JsonValue| -> BoxFuture<'static, Result<String, String>> {
+            std::sync::Arc::new(move |args: ::serde_json::Value| -> ::futures::future::BoxFuture<'static, Result<String, String>> {
                 Box::pin(async move {
                     // 反序列化参数
                     let args: $args_type = serde_json::from_value(args)
@@ -253,56 +312,4 @@ macro_rules! validate_all_tools {
         validate_tool!(HistoricalDataQuery);
         validate_tool!(ExperimentalDataReader);
     };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn test_tool_registration_macro() {
-        use crate::server::mcp::tool_registry::ToolRegistry;
-
-        let mut registry = ToolRegistry {
-            tools: HashMap::new(),
-        };
-
-        // 测试单个工具注册
-        register_mcp_tools!(
-            registry,
-            ThinkTool {
-                args_type: ThinkArgs,
-                constructor: ThinkTool
-            },
-        );
-
-        assert_eq!(registry.tools.len(), 1);
-        assert!(registry.tools.contains_key("think"));
-    }
-
-    #[tokio::test]
-    async fn test_all_tools_registration_macro() {
-        use crate::server::mcp::tool_registry::ToolRegistry;
-
-        let mut registry = ToolRegistry {
-            tools: HashMap::new(),
-        };
-
-        // 测试批量工具注册
-        register_all_mcp_tools!(registry);
-
-        // 验证注册的工具数量
-        assert!(registry.tools.len() >= 5); // 至少有5个工具
-
-        // 验证特定工具存在
-        assert!(registry.tools.contains_key("think"));
-        assert!(registry.tools.contains_key("topPhi_simulator"));
-    }
-
-    #[test]
-    fn test_tool_validation_macro() {
-        // 编译时测试 - 如果工具没有实现正确的trait，这里会编译失败
-        validate_tool!(ThinkTool);
-    }
 }

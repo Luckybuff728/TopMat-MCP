@@ -51,6 +51,7 @@ impl ModelRouter {
         router.register("ollama-llama3", |req, auth_user| {
             Box::pin(ollama::ollama_llama3(req, auth_user))
         });
+        // 注册带工具的模型
         router.register("calphamesh", |req, auth_user| {
             Box::pin(qwen::calphamesh(req, auth_user))
         });
@@ -63,6 +64,9 @@ impl ModelRouter {
 
         router.register("coating", |req, auth_user| {
             Box::pin(coating_optimization::coating_optimization(req, auth_user))
+        });
+        router.register("battery", |req, auth_user| {
+            Box::pin(qwen::battery(req, auth_user))
         });
         router
     }

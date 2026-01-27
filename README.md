@@ -78,6 +78,10 @@ docker push 192.168.7.102:5000/topmat-llm:latest
 
 # 检查服务健康状态
 curl http://localhost:10007/health
+
+# 📝 详细部署指南
+# 更多关于私有仓库配置和自动化脚本的使用，请参阅 [自动化部署文档](./DEPLOYMENT.md)。
+
 ```
 
 ### 本地开发

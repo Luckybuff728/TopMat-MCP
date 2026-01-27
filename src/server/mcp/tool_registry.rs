@@ -12,7 +12,7 @@ use super::tools::*;
 use crate::register_all_mcp_tools;
 
 /// 工具调用函数类型
-type ToolCallFn = std::sync::Arc<
+pub type ToolCallFn = std::sync::Arc<
     dyn Fn(JsonValue) -> futures::future::BoxFuture<'static, Result<String, String>> + Send + Sync,
 >;
 
@@ -27,7 +27,7 @@ pub struct ToolEntry {
 /// 工具注册表
 pub struct ToolRegistry {
     /// 工具集合（使用 IndexMap 保持注册顺序）
-    tools: IndexMap<String, ToolEntry>,
+    pub(crate) tools: IndexMap<String, ToolEntry>,
 }
 
 // 静态单例实例

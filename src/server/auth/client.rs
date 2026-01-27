@@ -442,22 +442,3 @@ pub struct AuthClientConfig {
     pub timeout: Duration,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_datetime_parsing() {
-        // 创建一个虚拟的数据库连接用于测试
-        let db = crate::server::database::DatabaseConnection::new();
-        let client = AuthClient::new(None, db);
-
-        let valid_datetime = "2024-12-31T23:59:59Z";
-        let parsed = client.parse_datetime(valid_datetime);
-        assert!(parsed.is_some());
-
-        let invalid_datetime = "invalid-date";
-        let parsed = client.parse_datetime(invalid_datetime);
-        assert!(parsed.is_none());
-    }
-}

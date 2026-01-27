@@ -21,3 +21,13 @@ pub use phase_field::{
     SubmitPvdSimulationTask, SubmitSpinodalDecompositionTask,
     TaskIdParams as PhaseFieldTaskIdParams, TaskListParams,
 };
+pub mod battery;
+pub use battery::{
+    AnalyzeBatterySox, DetectBatteryAnomalies, EmptyArgs as BatteryEmptyArgs,
+    FileIdArgs as BatteryFileIdArgs, GetBatteryOptions, GetBatteryOutParams, GetBatteryParaInfo,
+    GetBatteryTaskStatus, GetSimulationResult, ListBatteryModels, ListBatteryParaSets,
+    ListSimulationResults, ParameterSetNameArgs, PredictBatteryRul, PredictionArgs,
+    RunBatterySimulation, SimulateArgs, SimulateTiannengBattery, SimulationResultArgs,
+    TaskIdArgs as BatteryTaskIdArgs, TiannengSimulateArgs, TrainBatteryLstm, TrainingArgs,
+    VariablesArgs,
+};

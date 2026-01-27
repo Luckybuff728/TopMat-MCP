@@ -1,7 +1,6 @@
 pub mod auth;
 pub mod chat;
 pub mod conversations;
-pub mod mcp;
 pub mod mcp_docs;
 pub mod mcp_stats;
 pub mod messages;

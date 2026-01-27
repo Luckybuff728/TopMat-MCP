@@ -180,6 +180,36 @@ pub async fn ml_server(
     handle_chat_request(raw_agent, request).await
 }
 
+
+pub async fn battery(
+    request: ChatRequest,
+    _auth_user: AuthUser,
+) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
+    let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
+    let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
+    let agent_builder = qwen_client
+        .agent("qwen-flash")
+        .preamble("你是一个专业的电池材料管理助手，专门负责电池材料的运维与管理服务。
+你的主要工作流程是：
+1. **模型管理**：通过ListBatteryModels和ListBatteryParaSets 获取电池材料的模型信息。
+2. **变量查询**：使用 GetBatteryParaInfo 和GetBatteryOutParams获取特定模型的输入输出节点信息及详细配置，注意模型输入和输出参数较多，一般不调用，如需查询，优先使用关键词查询。
+3. **仿真模拟**：根据用户输入，调用 RunBatterySimulation 进行电池材料的模拟。在执行模拟前，请确保已正确解析用户提供的参数并匹配模型输入要求。
+4. **结果查询**：如果有result_id，使用GetSimulationResult 获取电池材料的仿真结果。
+5. **结果列表**：使用ListSimulationResults 获取电池材料的仿真结果列表。
+请保持严谨，使用工具获取实时数据，不要提供未经证实的模型信息。如果操作失败，请清晰地向用户反馈错误原因。")
+        .temperature(0.8)
+        .tool(crate::server::mcp::tools::ListBatteryModels)
+        .tool(crate::server::mcp::tools::ListBatteryParaSets)
+        .tool(crate::server::mcp::tools::GetBatteryParaInfo)
+        .tool(crate::server::mcp::tools::GetBatteryOutParams)
+        .tool(crate::server::mcp::tools::RunBatterySimulation)
+        .tool(crate::server::mcp::tools::ListSimulationResults)
+        .tool(crate::server::mcp::tools::GetSimulationResult);
+
+    let raw_agent = agent_builder.build();
+    handle_chat_request(raw_agent, request).await
+}
+
 // pub async fn qwen_flash(
 //     request: ChatRequest,
 //     _auth_user: AuthUser,  // 目前暂不使用，但为了统一接口
