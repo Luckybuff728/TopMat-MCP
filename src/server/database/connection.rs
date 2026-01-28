@@ -37,7 +37,7 @@ impl DatabaseConnection {
     ) -> Result<Vec<crate::server::models::Message>, sqlx::Error> {
         let rows = sqlx::query(
             r#"
-            SELECT message_id, conversation_id, role, content, model, created_at,
+            SELECT message_id, conversation_id, role, content, reasoning_content, tool_calls, tool_call_id, model, created_at,
                    prompt_tokens, completion_tokens, total_tokens, metadata
             FROM messages
             WHERE conversation_id = $1
@@ -80,7 +80,20 @@ impl DatabaseConnection {
                         .try_get::<String, _>("conversation_id")
                         .unwrap_or_default(),
                     role: row.try_get::<String, _>("role").unwrap_or_default(),
-                    content: row.try_get::<String, _>("content").unwrap_or_default(),
+                    content: row.try_get::<Option<String>, _>("content").ok().flatten(),
+                    reasoning_content: row
+                        .try_get::<Option<String>, _>("reasoning_content")
+                        .ok()
+                        .flatten(),
+                    tool_calls: row
+                        .try_get::<Option<String>, _>("tool_calls")
+                        .ok()
+                        .flatten()
+                        .and_then(|s| serde_json::from_str(&s).ok()),
+                    tool_call_id: row
+                        .try_get::<Option<String>, _>("tool_call_id")
+                        .ok()
+                        .flatten(),
                     model: row.try_get::<Option<String>, _>("model").ok().flatten(),
                     usage: Some(crate::server::models::TokenUsage {
                         prompt_tokens: prompt_tokens as u32,
@@ -186,7 +199,10 @@ async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             message_id BIGSERIAL PRIMARY KEY,
             conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id),
             role TEXT NOT NULL,
-            content TEXT NOT NULL,
+            content TEXT,
+            reasoning_content TEXT,
+            tool_calls TEXT,
+            tool_call_id TEXT,
             model TEXT,
             prompt_tokens INTEGER,
             completion_tokens INTEGER,
@@ -198,6 +214,27 @@ async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // 迁移：为现有数据库添加新列
+    sqlx::query("ALTER TABLE messages ALTER COLUMN content DROP NOT NULL")
+        .execute(pool)
+        .await
+        .ok(); // 忽略错误（列可能已经是可空的）
+
+    sqlx::query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reasoning_content TEXT")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_calls TEXT")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_call_id TEXT")
+        .execute(pool)
+        .await
+        .ok();
 
     // 创建使用统计表
     sqlx::query(

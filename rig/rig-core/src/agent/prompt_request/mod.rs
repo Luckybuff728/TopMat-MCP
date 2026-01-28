@@ -13,7 +13,6 @@ use std::{
 use tracing::{Instrument, span::Id};
 
 use futures::{StreamExt, stream};
-use tracing::info_span;
 
 use crate::{
     OneOrMany,
@@ -277,7 +276,7 @@ where
 {
     async fn send(self) -> Result<PromptResponse, PromptError> {
         let agent_span = if tracing::Span::current().is_disabled() {
-            info_span!(
+            tracing::debug_span!(
                 "invoke_agent",
                 gen_ai.operation.name = "invoke_agent",
                 gen_ai.agent.name = self.agent.name(),
@@ -323,7 +322,7 @@ where
             current_max_depth += 1;
 
             if self.max_depth > 1 {
-                tracing::info!(
+                tracing::debug!(
                     "Current conversation depth: {}/{}",
                     current_max_depth,
                     self.max_depth
@@ -342,7 +341,7 @@ where
                 }
             }
             let span = tracing::Span::current();
-            let chat_span = info_span!(
+            let chat_span = tracing::debug_span!(
                 target: "rig::agent_chat",
                 parent: &span,
                 "chat",
@@ -413,7 +412,7 @@ where
                     .join("\n");
 
                 if self.max_depth > 1 {
-                    tracing::info!("Depth reached: {}/{}", current_max_depth, self.max_depth);
+                    tracing::debug!("Depth reached: {}/{}", current_max_depth, self.max_depth);
                 }
 
                 agent_span.record("gen_ai.completion", &merged_texts);
@@ -433,7 +432,7 @@ where
                     let cancel_sig1 = cancel_sig.clone();
                     let cancel_sig2 = cancel_sig.clone();
 
-                    let tool_span = info_span!(
+                    let tool_span = tracing::debug_span!(
                         "execute_tool",
                         gen_ai.operation.name = "execute_tool",
                         gen_ai.tool.type = "function",
@@ -491,7 +490,7 @@ where
                                 }
                             }
                             tool_span.record("gen_ai.tool.call.result", &output);
-                            tracing::info!(
+                            tracing::debug!(
                                 "executed tool {tool_name} with args {args}. result: {output}"
                             );
                             if let Some(call_id) = tool_call.call_id.clone() {

@@ -10,7 +10,7 @@ use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::info_span;
+
 use tracing_futures::Instrument;
 
 use crate::{
@@ -156,7 +156,7 @@ where
     #[cfg_attr(feature = "worker", worker::send)]
     async fn send(self) -> StreamingResult<M::StreamingResponse> {
         let agent_span = if tracing::Span::current().is_disabled() {
-            info_span!(
+            tracing::debug_span!(
                 "invoke_agent",
                 gen_ai.operation.name = "invoke_agent",
                 gen_ai.agent.name = self.agent.name(),
@@ -209,7 +209,7 @@ where
                 current_max_depth += 1;
 
                 if self.max_depth > 1 {
-                    tracing::info!(
+                    tracing::debug!(
                         "Current conversation depth: {}/{}",
                         current_max_depth,
                         self.max_depth
@@ -229,7 +229,7 @@ where
                     }
                 }
 
-                let chat_stream_span = info_span!(
+                let chat_stream_span = tracing::debug_span!(
                     target: "rig::agent_chat",
                     parent: tracing::Span::current(),
                     "chat_streaming",
@@ -277,7 +277,7 @@ where
                             did_call_tool = false;
                         },
                         Ok(StreamedAssistantContent::ToolCall(tool_call)) => {
-                            let tool_span = info_span!(
+                            let tool_span = tracing::debug_span!(
                                 parent: tracing::Span::current(),
                                 "execute_tool",
                                 gen_ai.operation.name = "execute_tool",
@@ -476,15 +476,18 @@ pub async fn stream_to_stdout<R>(
     while let Some(content) = stream.next().await {
         match content {
             Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolCall(tool_call))) => {
-                println!("\n[Tool call] {}: {}({})",
-                    tool_call.id,
-                    tool_call.function.name,
-                    tool_call.function.arguments);
+                println!(
+                    "\n[Tool call] {}: {}({})",
+                    tool_call.id, tool_call.function.name, tool_call.function.arguments
+                );
                 println!("Response: ");
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();
             }
 
-            Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolResult { id, result })) => {
+            Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolResult {
+                id,
+                result,
+            })) => {
                 println!("\n[Tool Result] {}: {}", id, result);
                 print!("Response: ");
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();

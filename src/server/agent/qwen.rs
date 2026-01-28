@@ -15,11 +15,19 @@ pub async fn qwen_plus(
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.5);
-    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
+    let mut agent_builder = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent(model)
         .preamble(system_prompt)
-        .temperature(temperature as f64)
-        .build();
+        .temperature(temperature as f64);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
+
+    let agent = agent_builder.build();
 
     let history = if let Some(cvid) = &request.conversation_id {
         HistoryManager::new(db).get_context(cvid).await.ok()
@@ -39,11 +47,19 @@ pub async fn qwen_turbo(
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
+    let mut agent_builder = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwen-turbo")
         .preamble(system_prompt)
-        .temperature(temperature as f64)
-        .build();
+        .temperature(temperature as f64);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
+
+    let agent = agent_builder.build();
 
     let history = if let Some(cvid) = &request.conversation_id {
         HistoryManager::new(db).get_context(cvid).await.ok()
@@ -63,11 +79,19 @@ pub async fn qwen_max(
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
+    let mut agent_builder = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwen-max")
         .preamble(system_prompt)
-        .temperature(temperature as f64)
-        .build();
+        .temperature(temperature as f64);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
+
+    let agent = agent_builder.build();
 
     let history = if let Some(cvid) = &request.conversation_id {
         HistoryManager::new(db).get_context(cvid).await.ok()
@@ -87,11 +111,19 @@ pub async fn qwen_flash(
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let system_prompt = request.system_prompt.as_deref().unwrap_or("");
     let temperature = request.temperature.unwrap_or(0.8);
-    let agent = rig::providers::qwen::Client::new_with_api_key(api_key)
+    let mut agent_builder = rig::providers::qwen::Client::new_with_api_key(api_key)
         .agent("qwen-flash")
         .preamble(system_prompt)
-        .temperature(temperature as f64)
-        .build();
+        .temperature(temperature as f64);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
+
+    let agent = agent_builder.build();
 
     let history = if let Some(cvid) = &request.conversation_id {
         HistoryManager::new(db).get_context(cvid).await.ok()
@@ -145,7 +177,7 @@ pub async fn calphamesh(
         user_api_key
     );
 
-    let agent_builder = qwen_client
+    let mut agent_builder = qwen_client
         .agent("qwen-flash")
         .preamble(&prompt)
         .temperature(0.8)
@@ -154,6 +186,13 @@ pub async fn calphamesh(
         .tool(crate::server::mcp::tools::SubmitScheilTask)
         .tool(crate::server::mcp::tools::GetTaskStatus)
         .tool(crate::server::mcp::tools::ListTasks);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
 
     let raw_agent = agent_builder.build();
 
@@ -184,7 +223,7 @@ pub async fn phase_field(
 请引导用户正确配置模拟参数，确保模拟流程的完整性。在讨论模拟结果时，请结合物理背景提供深入的见解。",
         user_api_key
     );
-    let agent = qwen_client
+    let mut agent_builder = qwen_client
         .agent("qwen-flash")
         .preamble(&prompt)
         .temperature(0.8)
@@ -194,10 +233,16 @@ pub async fn phase_field(
         .tool(crate::server::mcp::tools::PhaseFieldGetTaskStatus)
         .tool(crate::server::mcp::tools::StopTask)
         .tool(crate::server::mcp::tools::ProbeTaskFiles)
-        .tool(crate::server::mcp::tools::RetrieveFile)
-        .build();
+        .tool(crate::server::mcp::tools::RetrieveFile);
 
-    // let raw_agent = agent_builder.build();
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
+
+    let agent = agent_builder.build();
     let history = if let Some(cvid) = &request.conversation_id {
         HistoryManager::new(db).get_context(cvid).await.ok()
     } else {
@@ -214,7 +259,7 @@ pub async fn ml_server(
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
-    let agent_builder = qwen_client
+    let mut agent_builder = qwen_client
         .agent("qwen-flash")
         .preamble("你是一个专业的机器学习模型管理助手，专门负责 ONNX 模型的运维与推理服务。
 你的主要职责包括：
@@ -228,6 +273,13 @@ pub async fn ml_server(
         .tool(crate::server::mcp::tools::OnnxUnloadModel)
         .tool(crate::server::mcp::tools::OnnxGetModelConfig)
         .tool(crate::server::mcp::tools::OnnxModelInference);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
 
     let raw_agent = agent_builder.build();
 
@@ -247,7 +299,7 @@ pub async fn battery(
 ) -> Result<(axum::response::Response, ChatResponse), ErrorResponse> {
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
-    let agent_builder = qwen_client
+    let mut agent_builder = qwen_client
         .agent("qwen-flash")
         .preamble("你是一个专业的电池材料管理助手，专门负责电池材料的运维与管理服务。
 你的主要工作流程是：
@@ -265,6 +317,13 @@ pub async fn battery(
         .tool(crate::server::mcp::tools::RunBatterySimulation)
         .tool(crate::server::mcp::tools::ListSimulationResults)
         .tool(crate::server::mcp::tools::GetSimulationResult);
+
+    // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
+    if request.enable_reasoning.unwrap_or(false) {
+        agent_builder = agent_builder.additional_params(serde_json::json!({
+            "enable_thinking": true
+        }));
+    }
 
     let raw_agent = agent_builder.build();
 

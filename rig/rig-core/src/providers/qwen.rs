@@ -27,7 +27,7 @@ use tracing::{Instrument, info_span};
 // 导入 Rig 核心类型
 use crate::{
     client::{ClientBuilderError, CompletionClient, ProviderClient, VerifyClient, VerifyError},
-    completion::{self, CompletionError, CompletionRequest, message, MessageError},
+    completion::{self, CompletionError, CompletionRequest, MessageError, message},
     impl_conversion_traits, json_utils,
 };
 
@@ -285,23 +285,30 @@ where
         let request = self
             .post("text-generation/generation")?
             .header("Content-Type", "application/json")
-            .body(serde_json::to_vec(&json!({
-                "model": "qwen-turbo",
-                "input": {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "test"
-                        }
-                    ]
-                },
-                "parameters": {
-                    "max_tokens": 1
-                }
-            })).map_err(|e| http_client::Error::from(http_client::Error::Instance(e.into())))?)
+            .body(
+                serde_json::to_vec(&json!({
+                    "model": "qwen-turbo",
+                    "input": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "test"
+                            }
+                        ]
+                    },
+                    "parameters": {
+                        "max_tokens": 1
+                    }
+                }))
+                .map_err(|e| http_client::Error::from(http_client::Error::Instance(e.into())))?,
+            )
             .map_err(|e| VerifyError::ProviderError(e.to_string()))?;
 
-        let response = self.http_client.send(request).await.map_err(http_client::Error::from)?;
+        let response = self
+            .http_client
+            .send(request)
+            .await
+            .map_err(http_client::Error::from)?;
 
         // 匹配响应状态码
         match response.status() {
@@ -312,7 +319,9 @@ where
             // 403 禁止访问 - 无效认证
             reqwest::StatusCode::FORBIDDEN => Err(VerifyError::InvalidAuthentication),
             // 其他错误
-            _ => Err(VerifyError::ProviderError(http_client::text(response).await?)),
+            _ => Err(VerifyError::ProviderError(
+                http_client::text(response).await?,
+            )),
         }
     }
 }
@@ -570,13 +579,13 @@ impl TryFrom<message::Message> for Vec<Message> {
                 let text_messages = content
                     .into_iter()
                     .filter_map(|content| match content {
-                        message::UserContent::Text(text) => Some(Message::User {
-                            content: text.text,
-                        }),
+                        message::UserContent::Text(text) => {
+                            Some(Message::User { content: text.text })
+                        }
                         _ => None,
                     })
                     .collect::<Vec<_>>();
-                
+
                 // 添加文本消息到消息列表
                 messages.extend(text_messages);
 
@@ -588,6 +597,7 @@ impl TryFrom<message::Message> for Vec<Message> {
                 let mut messages = vec![];
                 let mut text_content = String::new();
                 let mut tool_calls = vec![];
+                let mut reasoning_content: Option<String> = None;
 
                 // 遍历内容
                 for item in content {
@@ -600,16 +610,26 @@ impl TryFrom<message::Message> for Vec<Message> {
                         completion::AssistantContent::ToolCall(call) => {
                             tool_calls.push(ToolCall::from(call));
                         }
-                        // 推理内容（暂不处理）
+                        // 推理内容
+                        completion::AssistantContent::Reasoning(reasoning) => {
+                            let r_text = reasoning.reasoning.join("\n");
+                            let mut current = reasoning_content.unwrap_or_default();
+                            if !current.is_empty() {
+                                current.push_str("\n");
+                            }
+                            current.push_str(&r_text);
+                            reasoning_content = Some(current);
+                        }
                         _ => {}
                     }
                 }
 
-                // 如果有内容或工具调用，添加助手消息
-                if !text_content.is_empty() || !tool_calls.is_empty() {
+                // 如果有内容、工具调用或推理内容，添加助手消息
+                if !text_content.is_empty() || !tool_calls.is_empty() || reasoning_content.is_some()
+                {
                     messages.push(Message::Assistant {
                         content: text_content,
-                        reasoning_content: None,
+                        reasoning_content,
                         tool_calls,
                     });
                 }
@@ -702,7 +722,7 @@ impl TryFrom<CompletionResponse> for completion::CompletionResponse<CompletionRe
                 if let Some(reasoning) = reasoning_content {
                     if !reasoning.is_empty() {
                         result.push(completion::AssistantContent::Reasoning(
-                            message::Reasoning::new(reasoning)
+                            message::Reasoning::new(reasoning),
                         ));
                     }
                 }
@@ -818,7 +838,8 @@ where
         // 添加工具（如果有）
         if !completion_request.tools.is_empty() {
             request["parameters"]["tools"] = json!(
-                completion_request.tools
+                completion_request
+                    .tools
                     .into_iter()
                     .map(ToolDefinition::from)
                     .collect::<Vec<_>>()
@@ -897,7 +918,8 @@ where
                 .map_err(|e| CompletionError::ResponseError(e.to_string()))?;
 
             // 构建请求
-            let req = self.client
+            let req = self
+                .client
                 .post("text-generation/generation")?
                 .header("Content-Type", "application/json")
                 .body(body)
@@ -914,10 +936,13 @@ where
                 tracing::debug!(target: "rig", "Qwen completion response: {text}");
 
                 // 解析响应
-                let api_response: CompletionResponse = serde_json::from_str(&text)
-                    .map_err(|e| {
+                let api_response: CompletionResponse =
+                    serde_json::from_str(&text).map_err(|e| {
                         tracing::error!("Failed to parse response: {}. Response text: {}", e, text);
-                        CompletionError::ResponseError(format!("Parse error: {}. Response: {}", e, text))
+                        CompletionError::ResponseError(format!(
+                            "Parse error: {}. Response: {}",
+                            e, text
+                        ))
                     })?;
 
                 // 获取当前 span
@@ -932,13 +957,18 @@ where
                 // 记录输入令牌数
                 span.record("gen_ai.usage.input_tokens", api_response.usage.input_tokens);
                 // 记录输出令牌数
-                span.record("gen_ai.usage.output_tokens", api_response.usage.output_tokens);
+                span.record(
+                    "gen_ai.usage.output_tokens",
+                    api_response.usage.output_tokens,
+                );
 
                 // 转换响应
                 api_response.try_into()
             } else {
                 // 返回提供商错误
-                Err(CompletionError::ProviderError(http_client::text(response).await?))
+                Err(CompletionError::ProviderError(
+                    http_client::text(response).await?,
+                ))
             }
         }
         // 应用追踪工具
@@ -977,7 +1007,8 @@ where
             .map_err(|e| CompletionError::ResponseError(e.to_string()))?;
 
         // 构建 HTTP 请求
-        let req = self.client
+        let req = self
+            .client
             .post("text-generation/generation")?
             .header("Content-Type", "application/json")
             .header("X-DashScope-SSE", "enable")
@@ -1006,7 +1037,11 @@ where
         };
 
         // 使用追踪工具发送流式请求
-        tracing::Instrument::instrument(send_qwen_streaming_request(self.client.http_client.clone(), req), span).await
+        tracing::Instrument::instrument(
+            send_qwen_streaming_request(self.client.http_client.clone(), req),
+            span,
+        )
+        .await
     }
 }
 
@@ -1154,7 +1189,7 @@ where
                 // SSE 消息事件
                 Ok(Event::Message(message)) => {
                     tracing::debug!("Received SSE message: {}", message.data);
-                    
+
                     // 跳过空消息
                     if message.data.trim().is_empty() {
                         continue;
@@ -1168,7 +1203,7 @@ where
                         tracing::warn!("Couldn't parse SSE payload: {}. Data: {}", err, message.data);
                         continue;
                     };
-                    
+
                     tracing::debug!("Successfully parsed streaming chunk");
 
                     // 处理第一个选择
@@ -1195,7 +1230,7 @@ where
                                     reasoning_response.push_str(reasoning);
                                     reasoning
                                 };
-                                
+
                                 // 只在有增量内容时生成推理内容结果
                                 if !incremental_reasoning.is_empty() {
                                     yield Ok(crate::streaming::RawStreamingChoice::Reasoning {
@@ -1234,13 +1269,13 @@ where
                                             // arguments 是新的增量片段
                                             &function.arguments
                                         };
-                                        
+
                                         // 如果增量参数不为空，yield 为文本（这样用户能看到工具调用的参数流式输出）
                                         if !incremental_args.is_empty() {
                                             // 将工具调用参数作为文本流式输出，让用户能看到
                                             yield Ok(crate::streaming::RawStreamingChoice::Message(incremental_args.to_string()));
                                         }
-                                        
+
                                         // 合并参数
                                         let combined = if function.arguments.starts_with(existing_args) {
                                             function.arguments.clone()
@@ -1255,7 +1290,7 @@ where
                                         if !function.arguments.is_empty() {
                                             yield Ok(crate::streaming::RawStreamingChoice::Message(function.arguments.clone()));
                                         }
-                                        
+
                                         // 尝试从 ID 或索引创建工具调用映射
                                         let id = tool_call.id.clone().unwrap_or_else(|| format!("call_{}", tool_call.index));
                                         let name = function.name.clone().unwrap_or_else(|| String::from("unknown"));
@@ -1306,7 +1341,7 @@ where
                                     text_response.push_str(content);
                                     content
                                 };
-                                
+
                                 // 只在有增量内容时生成消息结果
                                 if !incremental_text.is_empty() {
                                     yield Ok(crate::streaming::RawStreamingChoice::Message(incremental_text.to_string()));
@@ -1358,7 +1393,7 @@ where
                     arguments: arguments_json.clone()
                 }
             });
-            
+
             // 生成工具调用结果
             yield Ok(crate::streaming::RawStreamingChoice::ToolCall {
                 id,

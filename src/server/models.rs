@@ -3,56 +3,9 @@ use std::collections::HashMap;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-/// 聊天请求结构
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct ChatRequest {
-    /// 用户输入的消息
-    pub message: String,
-    /// 是否使用流式响应
-    #[serde(default)]
-    pub stream: bool,
-    /// 使用的模型名称
-    #[serde(default = "default_model")]
-    pub model: String,
-    /// 系统提示词
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_prompt: Option<String>,
-    /// 温度参数
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    /// 最大token数
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-    /// 会话ID（用于多轮对话，可选）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub conversation_id: Option<String>,
-    /// 额外的元数据（可选）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
-}
-
-fn default_model() -> String {
-    "qwen3:4b".to_string()
-}
-
-/// 聊天响应结构（非流式）
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct ChatResponse {
-    /// 响应内容
-    pub content: String,
-    /// 使用的模型
-    pub model: String,
-    /// Token使用情况
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TokenUsage>,
-    /// 会话ID
-    pub conversation_id: String,
-    /// 响应时间戳
-    pub timestamp: chrono::DateTime<chrono::Local>,
-    /// 额外的元数据
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, serde_json::Value>,
-}
+// =============================================================================
+// 1. 基础基础设施 (Common & Infrastructure)
+// =============================================================================
 
 /// Token使用情况
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -63,55 +16,6 @@ pub struct TokenUsage {
     pub completion_tokens: u32,
     /// 总token数
     pub total_tokens: u32,
-}
-
-/// 流式响应的数据块
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum StreamChunk {
-    /// 文本内容块
-    #[serde(rename = "content")]
-    Text {
-        /// 文本内容
-        text: String,
-        /// 是否为最后一个块
-        #[serde(default)]
-        finished: bool,
-    },
-    /// 推理过程
-    #[serde(rename = "reasoning")]
-    Reasoning {
-        /// 推理内容
-        reasoning: String,
-    },
-    /// 工具调用
-    #[serde(rename = "tool_call")]
-    ToolCall {
-        /// 工具名称
-        name: String,
-        /// 工具参数
-        arguments: serde_json::Value,
-    },
-    /// 工具响应
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        /// 工具调用ID
-        id: String,
-        /// 工具执行结果
-        result: String,
-    },
-    /// 错误信息
-    #[serde(rename = "error")]
-    Error {
-        /// 错误消息
-        message: String,
-    },
-    /// 最终响应信息
-    #[serde(rename = "final")]
-    Final {
-        /// 完整的响应信息
-        response: ChatResponse,
-    },
 }
 
 /// API错误响应
@@ -128,7 +32,9 @@ pub struct ErrorResponse {
     pub timestamp: chrono::DateTime<chrono::Local>,
 }
 
-// ============== 鉴权相关数据结构 ==============
+// =============================================================================
+// 2. 身份认证与用户管理 (Authentication & User Management)
+// =============================================================================
 
 /// 用户信息结构
 #[derive(Debug, Deserialize, Serialize, Clone, ToSchema)]
@@ -176,6 +82,26 @@ pub struct AuthResult {
     pub user_info: UserInfo,
 }
 
+/// 身份认证请求
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct AuthRequest {
+    /// API 密钥
+    pub api_key: String,
+}
+
+/// 身份认证响应
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct AuthResponse {
+    /// 认证是否成功
+    pub success: bool,
+    /// 用户信息
+    pub user: Option<UserInfo>,
+    /// 访问令牌
+    pub token: Option<String>,
+    /// 错误信息（如果失败）
+    pub error: Option<String>,
+}
+
 /// 鉴权客户端错误类型
 #[derive(Debug)]
 pub enum AuthError {
@@ -217,7 +143,146 @@ impl std::fmt::Display for AuthError {
 
 impl std::error::Error for AuthError {}
 
-// ============== 对话历史管理相关 ==============
+// =============================================================================
+// 3. 核心聊天与 AI 交互 (Core Chat & AI Interaction)
+// =============================================================================
+
+/// 聊天请求结构
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ChatRequest {
+    /// 用户输入的消息
+    pub message: String,
+    /// 是否使用流式响应
+    #[serde(default)]
+    pub stream: bool,
+    /// 使用的模型名称
+    #[serde(default = "default_model")]
+    pub model: String,
+    /// 系统提示词
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// 温度参数
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// 最大token数
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    /// 会话ID（用于多轮对话，可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    /// 是否开启思考模式（推理模式，可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_reasoning: Option<bool>,
+    /// 额外的元数据（可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+}
+
+fn default_model() -> String {
+    "qwen-flash".to_string()
+}
+
+/// 聊天响应结构（非流式）
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ChatResponse {
+    /// 响应内容
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// 深度思考内容
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    /// 工具调用列表 (JSON序列化)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallInfo>>,
+    /// 使用的模型
+    pub model: String,
+    /// Token使用情况
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TokenUsage>,
+    /// 会话ID
+    pub conversation_id: String,
+    /// 响应时间戳
+    pub timestamp: chrono::DateTime<chrono::Local>,
+    /// 额外的元数据
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+/// 工具调用信息 (OpenAI/DeepSeek 兼容格式)
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ToolCallInfo {
+    /// 工具调用ID
+    pub id: String,
+    /// 调用类型 (通常为 "function")
+    #[serde(rename = "type")]
+    pub call_type: String,
+    /// 函数调用详情
+    pub function: ToolFunctionCall,
+}
+
+/// 工具函数调用详情
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ToolFunctionCall {
+    /// 函数名称
+    pub name: String,
+    /// 函数参数 (JSON字符串)
+    pub arguments: String,
+}
+
+/// 流式响应的数据块
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum StreamChunk {
+    /// 文本内容块
+    #[serde(rename = "content")]
+    Text {
+        /// 文本内容
+        text: String,
+        /// 是否为最后一个块
+        #[serde(default)]
+        finished: bool,
+    },
+    /// 推理过程
+    #[serde(rename = "reasoning")]
+    Reasoning {
+        /// 推理内容
+        reasoning: String,
+    },
+    /// 工具调用
+    #[serde(rename = "tool_call")]
+    ToolCall {
+        /// 工具调用ID
+        id: String,
+        /// 工具名称
+        name: String,
+        /// 工具参数
+        arguments: serde_json::Value,
+    },
+    /// 工具响应
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        /// 工具调用ID
+        id: String,
+        /// 工具执行结果
+        result: serde_json::Value,
+    },
+    /// 错误信息
+    #[serde(rename = "error")]
+    Error {
+        /// 错误消息
+        message: String,
+    },
+    /// 最终响应信息
+    #[serde(rename = "final")]
+    Final {
+        /// 完整的响应信息
+        response: ChatResponse,
+    },
+}
+
+// =============================================================================
+// 4. 对话与消息历史 (Conversation & Message History)
+// =============================================================================
 
 /// 对话信息
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -247,33 +312,31 @@ pub struct Message {
     pub id: Option<i32>,
     /// 对话ID
     pub conversation_id: String,
-    /// 角色 (user/assistant/system)
+    /// 角色 (user/assistant/system/tool)
     pub role: String,
     /// 消息内容
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// 深度思考内容 (reasoning_content)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    /// 工具调用列表 (OpenAI/DeepSeek 兼容格式)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallInfo>>,
+    /// 工具调用ID (用于tool角色消息关联)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
     /// 使用的AI模型 (仅assistant角色时)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Token使用情况
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
     /// 元数据
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     /// 创建时间
     pub created_at: chrono::DateTime<chrono::Local>,
-}
-
-/// 创建对话请求
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct CreateConversationRequest {
-    /// 会话ID
-    pub conversation_id: Option<String>,
-    /// 对话标题 (可选)
-    pub title: Option<String>,
-    /// 系统提示词 (可选)
-    pub system_prompt: Option<String>,
-    /// 初始消息 (可选)
-    pub initial_message: Option<String>,
-    /// 使用的AI模型 (可选，默认为 qwen-plus)
-    pub model: Option<String>,
 }
 
 /// 对话列表查询参数
@@ -283,7 +346,7 @@ pub struct ListConversationsQuery {
     #[serde(default = "default_page_size")]
     pub limit: i64,
     /// 偏移量，默认0
-    #[serde(default = "default_offset")]
+    #[serde(default)]
     pub offset: i64,
     /// 按会话ID筛选（可选）
     pub conversation_id: Option<String>,
@@ -293,10 +356,6 @@ pub struct ListConversationsQuery {
 
 fn default_page_size() -> i64 {
     20
-}
-
-fn default_offset() -> i64 {
-    0
 }
 
 /// 对话列表响应
@@ -321,7 +380,7 @@ pub struct ListMessagesQuery {
     #[serde(default = "default_message_page_size")]
     pub limit: i64,
     /// 偏移量，默认0
-    #[serde(default = "default_message_offset")]
+    #[serde(default)]
     pub offset: i64,
     /// 获取指定消息ID之前的消息
     pub before: Option<i32>,
@@ -329,10 +388,6 @@ pub struct ListMessagesQuery {
 
 fn default_message_page_size() -> i64 {
     50
-}
-
-fn default_message_offset() -> i64 {
-    0
 }
 
 /// 消息列表响应
@@ -354,6 +409,21 @@ pub struct MessageListResponse {
     pub has_more: bool,
 }
 
+/// 创建对话请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateConversationRequest {
+    /// 会话ID
+    pub conversation_id: Option<String>,
+    /// 对话标题 (可选)
+    pub title: Option<String>,
+    /// 系统提示词 (可选)
+    pub system_prompt: Option<String>,
+    /// 初始消息 (可选)
+    pub initial_message: Option<String>,
+    /// 使用的AI模型 (可选，默认为 qwen-plus)
+    pub model: Option<String>,
+}
+
 /// 创建对话响应
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CreateConversationResponse {
@@ -370,29 +440,9 @@ pub struct UpdateConversationTitleRequest {
     pub title: String,
 }
 
-// ============== 鉴权相关数据结构 ==============
-
-/// 身份认证请求
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct AuthRequest {
-    /// API 密钥
-    pub api_key: String,
-}
-
-/// 身份认证响应
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct AuthResponse {
-    /// 认证是否成功
-    pub success: bool,
-    /// 用户信息
-    pub user: Option<UserInfo>,
-    /// 访问令牌
-    pub token: Option<String>,
-    /// 错误信息（如果失败）
-    pub error: Option<String>,
-}
-
-// ============== 模型相关数据结构 ==============
+// =============================================================================
+// 5. 模型管理 (Model Management)
+// =============================================================================
 
 /// 模型信息
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -422,7 +472,24 @@ pub struct ModelsResponse {
     pub timestamp: chrono::DateTime<chrono::Local>,
 }
 
-// ============== 使用统计相关数据结构 ==============
+/// 模型健康信息
+#[derive(Debug, Serialize)]
+pub struct ModelHealth {
+    /// 模型名称
+    pub name: String,
+    /// 状态
+    pub status: ServiceStatus,
+    /// 最后检查时间
+    pub last_checked: chrono::DateTime<chrono::Local>,
+    /// 响应时间（毫秒）
+    pub response_time_ms: Option<u64>,
+    /// 错误信息（如果有）
+    pub error: Option<String>,
+}
+
+// =============================================================================
+// 6. 使用统计 (Usage & Statistics)
+// =============================================================================
 
 /// 使用统计查询参数
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -476,7 +543,17 @@ pub struct DetailedUsageStats {
     pub model_usage: std::collections::HashMap<String, UsageStats>,
 }
 
-// ============== 健康检查相关数据结构 ==============
+/// 综合使用统计
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ComprehensiveStats {
+    pub mcp: McpUsageStats,
+    pub chat: serde_json::Value,
+    pub summary: serde_json::Value,
+}
+
+// =============================================================================
+// 7. 健康检查 (Health Check)
+// =============================================================================
 
 /// 服务健康状态
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -513,6 +590,12 @@ pub struct ServicesStatus {
     /// AI模型状态
     pub ai_models: std::collections::HashMap<String, ServiceStatus>,
 }
+
+// =============================================================================
+// 8. MCP (Model Context Protocol)
+// =============================================================================
+
+// --- MCP 使用统计 ---
 
 /// MCP统计查询参数
 #[derive(Debug, Deserialize, Clone, ToSchema)]
@@ -566,42 +649,7 @@ pub struct McpToolCallInfo {
     pub created_at: chrono::DateTime<chrono::Local>,
 }
 
-/// 综合使用统计
-#[derive(Debug, Serialize, ToSchema)]
-pub struct ComprehensiveStats {
-    pub mcp: McpUsageStats,
-    pub chat: serde_json::Value,
-    pub summary: serde_json::Value,
-}
-
-/// 模型健康信息
-#[derive(Debug, Serialize)]
-pub struct ModelHealth {
-    /// 模型名称
-    pub name: String,
-    /// 状态
-    pub status: ServiceStatus,
-    /// 最后检查时间
-    pub last_checked: chrono::DateTime<chrono::Local>,
-    /// 响应时间（毫秒）
-    pub response_time_ms: Option<u64>,
-    /// 错误信息（如果有）
-    pub error: Option<String>,
-}
-
-// ============== UUID 生成函数 ==============
-
-/// 生成新的会话ID（UUID v4）
-pub fn generate_conversation_id() -> String {
-    Uuid::new_v4().to_string()
-}
-
-// /// 验证会话ID格式
-// pub fn is_valid_conversation_id(id: &str) -> bool {
-//     id.parse::<Uuid>().is_ok()
-// }
-
-// ============== MCP 相关数据结构 ==============
+// --- MCP 协议核心 ---
 
 /// MCP 服务器信息
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -695,4 +743,13 @@ pub struct McpInitializeResponse {
     /// 服务器信息
     #[serde(rename = "serverInfo")]
     pub server_info: McpServerInfo,
+}
+
+// =============================================================================
+// 9. 实用工具 (Utilities)
+// =============================================================================
+
+/// 生成新的会话ID（UUID v4）
+pub fn generate_conversation_id() -> String {
+    Uuid::new_v4().to_string()
 }

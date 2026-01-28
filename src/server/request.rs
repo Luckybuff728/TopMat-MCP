@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response, Sse, sse::Event},
 };
 use futures_util::StreamExt;
+use rig::completion::Prompt;
 use rig::streaming::{StreamingChat, StreamingPrompt};
 use tracing::{info, warn};
 
@@ -130,45 +131,63 @@ pub async fn handle_normal_request<M: rig::completion::CompletionModel + Send + 
     history: Option<Vec<rig::message::Message>>,
 ) -> Result<(Response, ChatResponse), ErrorResponse> {
     let any_agent = agent.into();
-    let agent = any_agent.inner_agent().clone();
+    let agent = any_agent.inner_agent();
 
-    // 使用 completion_request 获取完整响应（包含 token usage）
-    let mut completion_request = agent.model.completion_request(&request.message);
+    // 构建 PromptRequest
+    let mut history_vec = history.unwrap_or_default();
+    let initial_len = history_vec.len();
 
-    // 如果有历史消息，添加到请求中
-    if let Some(history) = history {
-        completion_request = completion_request.messages(history);
-    }
+    let prompt_request = agent
+        .prompt(&request.message)
+        .with_history(&mut history_vec)
+        .multi_turn(20)
+        .extended_details();
 
-    match completion_request.send().await {
-        Ok(completion_response) => {
-            // 提取响应文本
-            let content = completion_response
-                .choice
-                .iter()
-                .filter_map(|c| match c {
-                    rig::completion::AssistantContent::Text(text) => Some(text.text.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("");
-
-            // 转换 Usage 到我们的 TokenUsage 格式
+    match prompt_request.await {
+        Ok(prompt_response) => {
+            let content = prompt_response.output;
             let usage = Some(TokenUsage {
-                prompt_tokens: completion_response.usage.input_tokens as u32,
-                completion_tokens: completion_response.usage.output_tokens as u32,
-                total_tokens: completion_response.usage.total_tokens as u32,
+                prompt_tokens: prompt_response.total_usage.input_tokens as u32,
+                completion_tokens: prompt_response.total_usage.output_tokens as u32,
+                total_tokens: prompt_response.total_usage.total_tokens as u32,
             });
 
+            // Capture intermediate messages
+            let mut metadata = HashMap::new();
+            if history_vec.len() > initial_len + 1 {
+                // The last message is the final assistant response (which might be what we just got)
+                // The messages between initial_len + 1 and history_vec.len() - 1 are intermediate
+                // Actually, history_vec.push(prompt) happened inside PromptRequest::send
+                // Then history_vec.push(assistant_tool_calls)
+                // Then history_vec.push(user_tool_results)
+                // ...
+                // The last assistant message added to history_vec is the one that contains the final text.
+
+                // Let's just take all messages from initial_len onwards, excluding the very last one
+                // (which is the final assistant response that we are already returning as ChatResponse)
+                let intermediate = &history_vec[initial_len..history_vec.len() - 1];
+                if !intermediate.is_empty() {
+                    if let Ok(json_msgs) = serde_json::to_value(intermediate) {
+                        metadata.insert("_intermediate_messages".to_string(), json_msgs);
+                    }
+                }
+            }
+
             let chat_response = ChatResponse {
-                content,
+                content: if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                },
+                reasoning_content: None,
+                tool_calls: None,
                 model: request.model,
                 usage,
                 conversation_id: request
                     .conversation_id
                     .expect("conversation_id should exist"),
                 timestamp: chrono::Local::now(),
-                metadata: HashMap::new(),
+                metadata,
             };
             Ok((Json(chat_response.clone()).into_response(), chat_response))
         }
@@ -235,6 +254,7 @@ where
                         tool_call.id, tool_call.function.name, tool_call.function.arguments);
 
                     let chunk = StreamChunk::ToolCall {
+                        id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
                         arguments: serde_json::to_value(&tool_call.function).unwrap_or_default(),
                     };
@@ -245,9 +265,12 @@ where
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result })) => {
                     info!("McpAgent: 收到工具响应: {} - {}", id, result);
 
+                    // 尝试将结果字符串解析为 JSON，避免双重转义
+                    let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+
                     let chunk = StreamChunk::ToolResult {
                         id: id.clone(),
-                        result: result.clone(),
+                        result: result_value,
                     };
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
                     yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
@@ -278,7 +301,9 @@ where
 
                     let usage = res.usage();
                     let chat_response = ChatResponse {
-                        content: collected_content.clone(),
+                        content: if collected_content.is_empty() { None } else { Some(collected_content.clone()) },
+                        reasoning_content: None,
+                        tool_calls: None,
                         model: model.clone(),
                         usage: Some(TokenUsage {
                             prompt_tokens: usage.input_tokens as u32,
@@ -325,7 +350,9 @@ where
     info!("SSE响应已创建");
 
     let chat_response = ChatResponse {
-        content: String::new(), // 将通过SSE流填充
+        content: None, // 将通过SSE流填充
+        reasoning_content: None,
+        tool_calls: None,
         model: request.model,
         usage: None,
         conversation_id: request
@@ -379,6 +406,7 @@ where
                         tool_call.id, tool_call.function.name, tool_call.function.arguments);
 
                     let chunk = StreamChunk::ToolCall {
+                        id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
                         arguments: serde_json::to_value(&tool_call.function).unwrap_or_default(),
                     };
@@ -389,9 +417,12 @@ where
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result })) => {
                     info!("McpAgent: 收到工具响应: {} - {}", id, result);
 
+                    // 尝试将结果字符串解析为 JSON，避免双重转义
+                    let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+
                     let chunk = StreamChunk::ToolResult {
                         id: id.clone(),
-                        result: result.clone(),
+                        result: result_value,
                     };
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
                     yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
@@ -423,7 +454,9 @@ where
 
                     let usage = res.usage();
                     let chat_response = ChatResponse {
-                        content: collected_content.clone(),
+                        content: if collected_content.is_empty() { None } else { Some(collected_content.clone()) },
+                        reasoning_content: None,
+                        tool_calls: None,
                         model: model.clone(),
                         usage: Some(TokenUsage {
                             prompt_tokens: usage.input_tokens as u32,
@@ -470,7 +503,9 @@ where
     info!("McpAgent: SSE响应已创建");
 
     let chat_response = ChatResponse {
-        content: String::new(), // 将通过SSE流填充
+        content: None, // 将通过SSE流填充
+        reasoning_content: None,
+        tool_calls: None,
         model: request.model,
         usage: None,
         conversation_id: request

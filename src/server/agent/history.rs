@@ -66,14 +66,17 @@ impl HistoryManager {
         db_messages
             .into_iter()
             .filter_map(|msg| {
+                let content_text = msg.content.unwrap_or_default();
                 match msg.role.as_str() {
                     "user" => Some(RigMessage::User {
-                        content: rig::OneOrMany::one(UserContent::Text(Text { text: msg.content })),
+                        content: rig::OneOrMany::one(UserContent::Text(Text {
+                            text: content_text,
+                        })),
                     }),
                     "assistant" => Some(RigMessage::Assistant {
                         id: None,
                         content: rig::OneOrMany::one(AssistantContent::Text(Text {
-                            text: msg.content,
+                            text: content_text,
                         })),
                     }),
                     // "system" 角色通常由 preamble 处理，这里暂不包含在历史中以避免冲突

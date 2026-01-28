@@ -49,6 +49,7 @@ impl ServerState {
         example = json!({
             "message": "你好，请介绍一下你自己",
             "stream": false,
+            "enable_reasoning": false,
             "model": "qwen-plus",
             "system_prompt": "你是一个有用的AI助手",
             "temperature": 0.7,

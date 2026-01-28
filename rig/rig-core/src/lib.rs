@@ -141,8 +141,8 @@ pub use completion::message;
 pub use embeddings::Embed;
 pub use one_or_many::{EmptyListError, OneOrMany};
 
-#[cfg(feature = "derive")]
-#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
-pub use rig_derive::Embed;
+// #[cfg(feature = "derive")]
+// #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
+// pub use rig_derive::Embed;
 
 pub mod telemetry;

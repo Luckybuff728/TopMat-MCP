@@ -113,7 +113,7 @@ pub async fn list_messages_handler(
     }
 
     // 构建基本查询SQL - 使用PostgreSQL参数占位符
-    let base_sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
+    let base_sql = "SELECT message_id, conversation_id, role, content, reasoning_content, tool_calls, tool_call_id, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
          FROM messages WHERE conversation_id = $1";
 
     let (sql, _param_offset) = if let Some(_before_id) = params.before {
@@ -171,7 +171,20 @@ pub async fn list_messages_handler(
                     .try_get::<String, _>("conversation_id")
                     .unwrap_or_default(),
                 role: row.try_get::<String, _>("role").unwrap_or_default(),
-                content: row.try_get::<String, _>("content").unwrap_or_default(),
+                content: row.try_get::<Option<String>, _>("content").ok().flatten(),
+                reasoning_content: row
+                    .try_get::<Option<String>, _>("reasoning_content")
+                    .ok()
+                    .flatten(),
+                tool_calls: row
+                    .try_get::<Option<String>, _>("tool_calls")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                tool_call_id: row
+                    .try_get::<Option<String>, _>("tool_call_id")
+                    .ok()
+                    .flatten(),
                 model: row.try_get::<Option<String>, _>("model").ok().flatten(),
                 usage: if row
                     .try_get::<Option<i32>, _>("prompt_tokens")
@@ -326,7 +339,7 @@ pub async fn get_message_handler(
         });
     }
 
-    let sql = "SELECT message_id, conversation_id, role, content, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
+    let sql = "SELECT message_id, conversation_id, role, content, reasoning_content, tool_calls, tool_call_id, model, prompt_tokens, completion_tokens, total_tokens, metadata, created_at \
               FROM messages WHERE message_id = $1 AND conversation_id = $2";
 
     let row = sqlx::query(sql)
@@ -355,7 +368,20 @@ pub async fn get_message_handler(
             .try_get::<String, _>("conversation_id")
             .unwrap_or_default(),
         role: row.try_get::<String, _>("role").unwrap_or_default(),
-        content: row.try_get::<String, _>("content").unwrap_or_default(),
+        content: row.try_get::<Option<String>, _>("content").ok().flatten(),
+        reasoning_content: row
+            .try_get::<Option<String>, _>("reasoning_content")
+            .ok()
+            .flatten(),
+        tool_calls: row
+            .try_get::<Option<String>, _>("tool_calls")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok()),
+        tool_call_id: row
+            .try_get::<Option<String>, _>("tool_call_id")
+            .ok()
+            .flatten(),
         model: row.try_get::<Option<String>, _>("model").ok().flatten(),
         usage: if row
             .try_get::<Option<i32>, _>("prompt_tokens")

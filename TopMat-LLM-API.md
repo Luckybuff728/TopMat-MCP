@@ -226,9 +226,10 @@ Content-Type: application/json
 | 参数 | 类型 | 必需 | 描述 |
 |------|------|------|------|
 | `message` | string | 是 | 用户输入的消息 |
-| `model` | string | 否 | 模型名称，默认 `qwen-plus` |
+| `model` | string | 否 | 模型名称，默认 `qwen-flash` |
 | `stream` | boolean | 否 | 是否流式响应，默认 `false` |
 | `conversation_id` | string | 否 | 对话 ID (UUID)，不提供则自动创建 |
+| `enable_reasoning` | boolean | 否 | 是否开启思考模式（推理模式），默认 `false` |
 | `temperature` | float | 否 | 温度参数 (0.0-2.0) |
 | `max_tokens` | integer | 否 | 最大 token 数 |
 | `system_prompt` | string | 否 | 系统提示词 |
@@ -266,8 +267,10 @@ Content-Type: application/json
 ```
 data: {"type":"content","text":"你好","finished":false}
 data: {"type":"content","text":"！我是","finished":false}
-data: {"type":"tool_call","name":"calphamesh_list_tasks","arguments":{...}}
-data: {"type":"tool_result","id":"","result":"..."}
+data: {"type":"reasoning","reasoning":"正在思考..."}
+data: {"type":"tool_call","id":"call_abc123","name":"calphamesh_list_tasks","arguments":{...}}
+data: {"type":"tool_result","id":"call_abc123","result":"..."}
+data: {"type":"error","message":"发生了一些问题"}
 data: {"type":"final","response":{...}}
 ```
 
@@ -287,6 +290,8 @@ Authorization: Bearer your_api_key_here
 |------|------|--------|------|
 | `limit` | integer | 20 | 每页数量 |
 | `offset` | integer | 0 | 偏移量 |
+| `conversation_id` | string | - | 按会话 ID 筛选 |
+| `search` | string | - | 搜索关键词 (标题或摘要) |
 
 **响应示例:**
 ```json
@@ -298,6 +303,7 @@ Authorization: Bearer your_api_key_here
       "title": "材料科学讨论",
       "model": "qwen-plus",
       "message_count": 10,
+      "summary": "关于金属材料强度特性的讨论",
       "created_at": "2026-01-15T10:00:00+08:00",
       "updated_at": "2026-01-15T11:30:00+08:00"
     }
@@ -322,9 +328,34 @@ Content-Type: application/json
 **请求体:**
 ```json
 {
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
   "title": "新的对话主题",
   "model": "qwen-plus",
-  "first_message": "你好，开始我们的对话"
+  "system_prompt": "你是一个专业的材料科学助手",
+  "initial_message": "你好，开始我们的对话"
+}
+```
+
+**响应示例:**
+```json
+{
+  "conversation": {
+    "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+    "user_id": 1,
+    "title": "新的对话主题",
+    "model": "qwen-plus",
+    "message_count": 1,
+    "summary": null,
+    "created_at": "2026-01-15T12:00:00+08:00",
+    "updated_at": "2026-01-15T12:00:00+08:00"
+  },
+  "first_message": {
+    "id": 1,
+    "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+    "role": "user",
+    "content": "你好，开始我们的对话",
+    "created_at": "2026-01-15T12:00:00+08:00"
+  }
 }
 ```
 
@@ -335,6 +366,20 @@ Content-Type: application/json
 ```http
 GET /v1/conversations/{id}
 Authorization: Bearer your_api_key_here
+```
+
+**响应示例:**
+```json
+{
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "user_id": 1,
+  "title": "材料科学讨论",
+  "model": "qwen-plus",
+  "message_count": 10,
+  "summary": "关于金属材料强度特性的讨论",
+  "created_at": "2026-01-15T10:00:00+08:00",
+  "updated_at": "2026-01-15T11:30:00+08:00"
+}
 ```
 
 ---
@@ -354,6 +399,20 @@ Content-Type: application/json
 }
 ```
 
+**响应示例:**
+```json
+{
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "user_id": 1,
+  "title": "更新后的标题",
+  "model": "qwen-plus",
+  "message_count": 10,
+  "summary": "...",
+  "created_at": "2026-01-15T10:00:00+08:00",
+  "updated_at": "2026-01-15T12:30:00+08:00"
+}
+```
+
 ---
 
 ### 删除对话
@@ -361,6 +420,17 @@ Content-Type: application/json
 ```http
 DELETE /v1/conversations/{id}
 Authorization: Bearer your_api_key_here
+```
+
+**响应示例:**
+```json
+{
+  "success": true,
+  "message": "对话删除成功",
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "deleted_messages_count": 10,
+  "timestamp": "2026-01-15T13:00:00+08:00"
+}
 ```
 
 ---
@@ -381,6 +451,37 @@ Authorization: Bearer your_api_key_here
 | `offset` | integer | 0 | 偏移量 |
 | `before` | integer | - | 获取指定消息 ID 之前的消息 |
 
+**响应示例:**
+```json
+{
+  "messages": [
+    {
+      "id": 1,
+      "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+      "role": "user/assistant/tool",
+      "content": "你好",
+      "reasoning_content": "",
+      "tool_calls":[],
+      "tool_call_id": "",
+      "model": "qwen-plus",
+      "usage": {
+        "prompt_tokens": 5,
+        "completion_tokens": 10,
+        "total_tokens": 15
+      },
+      "medata": [],
+      "created_at": "2026-01-15T12:00:00+08:00"
+    }
+  ],
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "total": 1,
+  "page": 1,
+  "page_size": 50,
+  "total_pages": 1,
+  "has_more": false
+}
+```
+
 ---
 
 ### 获取消息详情
@@ -390,6 +491,27 @@ GET /v1/conversations/{id}/messages/{message_id}
 Authorization: Bearer your_api_key_here
 ```
 
+**响应示例:**
+```json
+{
+  "id": 1,
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "role": "assistant",
+  "content": "你好！有什么我可以帮您的吗？",
+  "reasoning_content": "用户说了你好，我应该礼貌回应。",
+  "tool_calls":[],
+  "tool_call_id": "",
+  "model": "qwen-plus",
+  "usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 10,
+    "total_tokens": 15
+  },
+  "medata": [],
+  "created_at": "2026-01-15T12:00:05+08:00"
+}
+```
+
 ---
 
 ### 删除消息
@@ -397,6 +519,17 @@ Authorization: Bearer your_api_key_here
 ```http
 DELETE /v1/conversations/{id}/messages/{message_id}
 Authorization: Bearer your_api_key_here
+```
+
+**响应示例:**
+```json
+{
+  "success": true,
+  "message": "消息删除成功",
+  "message_id": 2,
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "timestamp": "2026-01-15T13:30:00+08:00"
+}
 ```
 
 ---
@@ -416,6 +549,35 @@ Authorization: Bearer your_api_key_here
 | `period` | string | 统计周期 (day/week/month) |
 | `from_date` | string | 开始日期 (ISO 8601) |
 | `to_date` | string | 结束日期 (ISO 8601) |
+
+**响应示例:**
+```json
+{
+  "period": "day",
+  "from_date": "2026-01-27T17:42:29+08:00",
+  "to_date": "2026-01-28T17:42:29+08:00",
+  "stats": {
+    "total_requests": 150,
+    "total_tokens": 12500,
+    "total_cost": 0.25,
+    "avg_response_time_ms": 1150.0,
+    "model_usage": {
+      "qwen-plus": {
+        "model": "qwen-plus",
+        "requests": 100,
+        "tokens": 8000,
+        "cost": 0.16
+      },
+      "qwen-max": {
+        "model": "qwen-max",
+        "requests": 50,
+        "tokens": 4500,
+        "cost": 0.09
+      }
+    }
+  }
+}
+```
 
 ---
 
@@ -449,6 +611,27 @@ GET /usage/mcp/sessions
 Authorization: Bearer your_api_key_here
 ```
 
+**响应示例:**
+```json
+{
+  "data": [
+    {
+      "session_id": "sess_123456",
+      "transport_type": "http",
+      "tool_calls_count": 5,
+      "created_at": "2024-01-01T12:00:00+08:00",
+      "last_activity_at": "2024-01-01T12:30:00+08:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 25,
+    "total_pages": 2
+  }
+}
+```
+
 ---
 
 ### MCP 工具调用记录
@@ -458,6 +641,32 @@ GET /usage/mcp/tool-calls
 Authorization: Bearer your_api_key_here
 ```
 
+**响应示例:**
+```json
+{
+  "data": [
+    {
+      "session_id": "sess_123456",
+      "tool_name": "calpha_mesh_simulation",
+      "request_arguments": "{\"temp\": 1000}",
+      "response_result": "{\"status\": \"success\"}",
+      "status": "success",
+      "error_message": null,
+      "transport_type": "http",
+      "endpoint": "/mcp",
+      "execution_time_ms": 1250,
+      "created_at": "2024-01-01T12:15:00+08:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 150,
+    "total_pages": 8
+  }
+}
+```
+
 ---
 
 ### 综合统计
@@ -465,6 +674,31 @@ Authorization: Bearer your_api_key_here
 ```http
 GET /usage/comprehensive
 Authorization: Bearer your_api_key_here
+```
+
+**响应示例:**
+```json
+{
+  "mcp": {
+    "total_sessions": 25,
+    "total_tool_calls": 150,
+    "unique_tools_used": 8,
+    "success_rate": 0.95,
+    "transport_type_counts": {
+      "http": 80,
+      "sse": 70
+    }
+  },
+  "chat": {
+    "total_conversations": 300,
+    "total_messages": 15000
+  },
+  "summary": {
+    "total_requests": 450,
+    "active_sessions": 325,
+    "data_points": 15150
+  }
+}
 ```
 
 ---
