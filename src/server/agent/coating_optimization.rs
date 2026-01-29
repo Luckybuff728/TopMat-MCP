@@ -19,8 +19,11 @@ use crate::server::database::DatabaseConnection;
 use crate::server::middleware::auth::AuthUser;
 use crate::server::models::{ChatRequest, ChatResponse, ErrorResponse};
 use crate::server::request::handle_chat_request;
+use axum::response::IntoResponse;
+use futures_util::StreamExt;
 use rig::agent::AgentBuilder;
 use rig::prelude::*;
+use rig::streaming::StreamingChat;
 // ============= 错误类型定义 =============
 
 pub async fn coating_optimization(
@@ -120,25 +123,228 @@ pub async fn coating_optimization(
         .temperature(0.3)
         .build();
 
-    // ============= 手动编排流程（支持流式输出） =============
-    let history = if let Some(cvid) = &request.conversation_id {
-        HistoryManager::new(db).get_context(cvid).await.ok()
+    // ============= 交互式单步编排流程 =============
+    let accumulating_history = if let Some(cvid) = &request.conversation_id {
+        HistoryManager::new(db.clone())
+            .get_context(cvid)
+            .await
+            .ok()
+            .unwrap_or_default()
     } else {
-        None
+        Vec::new()
     };
 
-    let _ = handle_chat_request(requirement_agent, request.clone(), history.clone()).await;
-    // 【阶段二：性能预测】
-    let _ = handle_chat_request(prediction_agent, request.clone(), history.clone()).await;
-    // 【阶段三：优化建议】
-    let _ = handle_chat_request(composition_optimizer, request.clone(), history.clone()).await;
-    // P2: 结构优化
-    println!("\n--- P2: 结构优化 ---\n");
-    let _ = handle_chat_request(structure_optimizer, request.clone(), history.clone()).await;
-    // P3: 工艺优化
+    let stage_names = [
+        "需求提取专家",
+        "性能预测专家",
+        "成分优化专家",
+        "结构优化专家",
+        "工艺优化专家",
+        "迭代优化管理专家",
+    ];
 
-    let _ = handle_chat_request(process_optimizer, request.clone(), history.clone()).await;
-    // 【阶段四：迭代优化】
+    // 通过扫描历史记录中的专家标题来确定最后完成的阶段
+    let mut last_stage_index: i32 = -1;
+    for message in accumulating_history.iter().rev() {
+        if let rig::message::Message::Assistant { content, .. } = message {
+            let text = content
+                .iter()
+                .filter_map(|c| match c {
+                    rig::message::AssistantContent::Text(t) => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .collect::<String>();
 
-    handle_chat_request(iteration_agent, request, history).await
+            for (idx, name) in stage_names.iter().enumerate() {
+                if text.contains(&format!("【{}】", name)) {
+                    last_stage_index = idx as i32;
+                    break;
+                }
+            }
+            if last_stage_index != -1 {
+                break;
+            }
+        }
+    }
+
+    // 检查用户意图：进入下一阶段、保持原位（反馈）、还是退回
+    let user_message_lower = request.message.trim().to_lowercase();
+    let is_continue = ["继续", "continue", "next", "ok", "确认", "好的"]
+        .iter()
+        .any(|&s| user_message_lower.contains(s));
+
+    let is_back = ["退回", "返回", "上一步", "back", "previous", "return"]
+        .iter()
+        .any(|&s| user_message_lower.contains(s));
+
+    let target_stage_index = if last_stage_index == -1 {
+        // 初始状态
+        0
+    } else if is_back {
+        // 尝试解析用户想要退回到哪个阶段
+        let mut target_back_idx = (last_stage_index - 1).max(0); // 默认退回一步
+        for (idx, name) in stage_names.iter().enumerate() {
+            if user_message_lower.contains(&name.replace("专家", "").to_lowercase()) {
+                target_back_idx = idx as i32;
+                break;
+            }
+        }
+        target_back_idx
+    } else if is_continue {
+        // 推进到下一阶段
+        (last_stage_index + 1).min((stage_names.len() - 1) as i32)
+    } else {
+        // 保持在当前阶段（反馈模式）
+        last_stage_index
+    };
+
+    let (agent, next_prompt_hint) = match target_stage_index {
+        0 => (
+            requirement_agent,
+            "### 当前阶段：需求提取\n如果您确认以上信息，请输入“继续”以进行【性能预测】。",
+        ),
+        1 => (
+            prediction_agent,
+            "### 当前阶段：性能预测\n如果您确认以上信息，请输入“继续”以进行【成分优化 (P1)】。",
+        ),
+        2 => (
+            composition_optimizer,
+            "### 当前阶段：成分优化\n如果您确认以上信息，请输入“继续”以进行【结构优化 (P2)】。",
+        ),
+        3 => (
+            structure_optimizer,
+            "### 当前阶段：结构优化\n如果您确认以上信息，请输入“继续”以进行【工艺优化 (P3)】。",
+        ),
+        4 => (
+            process_optimizer,
+            "### 当前阶段：工艺优化\n如果您确认以上信息，请输入“继续”以进行【迭代优化】。",
+        ),
+        _ => (
+            iteration_agent,
+            "### 当前阶段：迭代优化\n优化建议已生成，您可以根据建议进行实验，或提出进一步的修改意见。",
+        ),
+    };
+
+    let model_name = request.model.clone();
+    let conversation_id = request
+        .conversation_id
+        .clone()
+        .unwrap_or_else(crate::server::models::generate_conversation_id);
+    let user_message = request.message.clone();
+
+    let event_stream = async_stream::stream! {
+        use crate::server::models::StreamChunk;
+        use rig::streaming::StreamedAssistantContent;
+        use rig::agent::MultiTurnStreamItem;
+
+        let agent_name = agent.name.clone().unwrap_or_else(|| "专家".to_string());
+
+        // 发送阶段标记
+        let phase_chunk = StreamChunk::Text {
+            text: format!("\n\n### 【{}】正在分析...\n\n", agent_name),
+            finished: false,
+        };
+        if let Ok(data) = serde_json::to_string(&phase_chunk) {
+            yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+        }
+
+        // 获取流
+        let mut stream = agent
+            .stream_chat(&user_message, accumulating_history.clone())
+            .multi_turn(20)
+            .await;
+
+        let mut agent_output = String::new();
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::Text(text))) => {
+                    agent_output.push_str(&text.text);
+                    let chunk = StreamChunk::Text {
+                        text: text.text,
+                        finished: false,
+                    };
+                    if let Ok(data) = serde_json::to_string(&chunk) {
+                        yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::Reasoning(reasoning))) => {
+                    let chunk = StreamChunk::Reasoning {
+                        reasoning: reasoning.reasoning.join("\n"),
+                    };
+                    if let Ok(data) = serde_json::to_string(&chunk) {
+                        yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolCall(tool_call))) => {
+                    let chunk = StreamChunk::ToolCall {
+                        id: tool_call.id.clone(),
+                        name: tool_call.function.name.clone(),
+                        arguments: serde_json::to_value(&tool_call.function).unwrap_or_default(),
+                    };
+                    if let Ok(data) = serde_json::to_string(&chunk) {
+                        yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolResult { id, result })) => {
+                     let chunk = StreamChunk::ToolResult {
+                        id: id.clone(),
+                        result: serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone())),
+                    };
+                    if let Ok(data) = serde_json::to_string(&chunk) {
+                        yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+                    }
+                }
+                Ok(MultiTurnStreamItem::StreamItem(_)) => {
+                    // 忽略 ToolCallDelta 和 Final 等中间/最终提供商特定的内容
+                }
+                Ok(MultiTurnStreamItem::FinalResponse(_)) => {
+                    // 当前 Agent 执行结束
+                    break;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    let chunk = StreamChunk::Error { message: format!("Agent [{}] 发生错误: {}", agent_name, e) };
+                    if let Ok(data) = serde_json::to_string(&chunk) {
+                        yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 发送后续操作指引
+        let hint_chunk = StreamChunk::Text {
+            text: format!("\n\n---\n\n{}", next_prompt_hint),
+            finished: false,
+        };
+        if let Ok(data) = serde_json::to_string(&hint_chunk) {
+            yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+        }
+
+        // 发送最终完成标记
+        let final_chunk = StreamChunk::Text { text: "".to_string(), finished: true };
+        if let Ok(data) = serde_json::to_string(&final_chunk) {
+             yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
+        }
+    };
+
+    let sse_response = axum::response::Sse::new(event_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(10))
+            .text("keepalive"),
+    );
+
+    let chat_response = ChatResponse {
+        content: None,
+        reasoning_content: None,
+        tool_calls: None,
+        model: model_name,
+        usage: None,
+        conversation_id,
+        timestamp: chrono::Local::now(),
+        metadata: std::collections::HashMap::new(),
+    };
+
+    Ok((sse_response.into_response(), chat_response))
 }

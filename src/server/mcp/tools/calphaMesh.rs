@@ -119,7 +119,7 @@ pub struct PointTaskParams {
     #[serde(default = "default_database")]
     pub database: String,
     /// Calpha Mesh API 密钥
-    pub api_key: String,
+    pub api_key: Option<String>,
 }
 
 // Line 计算参数
@@ -142,7 +142,7 @@ pub struct LineTaskParams {
     #[serde(default = "default_database")]
     pub database: String,
     /// Calpha Mesh API 密钥
-    pub api_key: String,
+    pub api_key: Option<String>,
 }
 
 // Scheil 计算参数
@@ -159,14 +159,14 @@ pub struct ScheilTaskParams {
     #[serde(default = "default_database")]
     pub database: String,
     /// Calpha Mesh API 密钥
-    pub api_key: String,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TaskIdParams {
     pub task_id: i32,
     /// Calpha Mesh API 密钥
-    pub api_key: String,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -176,7 +176,7 @@ pub struct ListTasksParams {
     #[serde(default = "default_items_per_page")]
     pub items_per_page: i32,
     /// Calpha Mesh API 密钥
-    pub api_key: String,
+    pub api_key: Option<String>,
 }
 
 // 默认值函数
@@ -454,12 +454,16 @@ impl CalphaMeshClient {
 // 工具实现
 
 // 提交 Point 计算任务工具
-#[derive(Deserialize, Serialize)]
-pub struct SubmitPointTask;
+#[derive(Deserialize, Serialize, Default)]
+pub struct SubmitPointTask {
+    pub api_key: Option<String>,
+}
 
-impl Default for SubmitPointTask {
-    fn default() -> Self {
-        Self
+impl SubmitPointTask {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key: Some(api_key),
+        }
     }
 }
 
@@ -511,8 +515,13 @@ impl Tool for SubmitPointTask {
             return Ok(error_msg);
         }
 
-        // 使用参数中的 API key
-        let client = CalphaMeshClient::new(args.api_key.clone());
+        // 获取 API key
+        let api_key = args
+            .api_key
+            .clone()
+            .or_else(|| self.api_key.clone())
+            .ok_or_else(|| CalphaMeshError::MissingParameter("api_key".to_string()))?;
+        let client = CalphaMeshClient::new(api_key);
         let task_response = client.submit_point_task(args).await?;
 
         Ok(format!(
@@ -523,12 +532,16 @@ impl Tool for SubmitPointTask {
 }
 
 // 提交 Line 计算任务工具
-#[derive(Deserialize, Serialize)]
-pub struct SubmitLineTask;
+#[derive(Deserialize, Serialize, Default)]
+pub struct SubmitLineTask {
+    pub api_key: Option<String>,
+}
 
-impl Default for SubmitLineTask {
-    fn default() -> Self {
-        Self
+impl SubmitLineTask {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key: Some(api_key),
+        }
     }
 }
 
@@ -597,8 +610,13 @@ impl Tool for SubmitLineTask {
             return Ok(format!("结束组分错误: {}", error_msg));
         }
 
-        // 使用参数中的 API key
-        let client = CalphaMeshClient::new(args.api_key.clone());
+        // 获取 API key
+        let api_key = args
+            .api_key
+            .clone()
+            .or_else(|| self.api_key.clone())
+            .ok_or_else(|| CalphaMeshError::MissingParameter("api_key".to_string()))?;
+        let client = CalphaMeshClient::new(api_key);
         let task_response = client.submit_line_task(args).await?;
 
         Ok(format!(
@@ -609,12 +627,16 @@ impl Tool for SubmitLineTask {
 }
 
 // 提交 Scheil 计算任务工具
-#[derive(Deserialize, Serialize)]
-pub struct SubmitScheilTask;
+#[derive(Deserialize, Serialize, Default)]
+pub struct SubmitScheilTask {
+    pub api_key: Option<String>,
+}
 
-impl Default for SubmitScheilTask {
-    fn default() -> Self {
-        Self
+impl SubmitScheilTask {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key: Some(api_key),
+        }
     }
 }
 
@@ -666,8 +688,13 @@ impl Tool for SubmitScheilTask {
             return Ok(error_msg);
         }
 
-        // 使用参数中的 API key
-        let client = CalphaMeshClient::new(args.api_key.clone());
+        // 获取 API key
+        let api_key = args
+            .api_key
+            .clone()
+            .or_else(|| self.api_key.clone())
+            .ok_or_else(|| CalphaMeshError::MissingParameter("api_key".to_string()))?;
+        let client = CalphaMeshClient::new(api_key);
         let task_response = client.submit_scheil_task(args).await?;
 
         Ok(format!(
@@ -678,12 +705,16 @@ impl Tool for SubmitScheilTask {
 }
 
 // 查询任务状态工具
-#[derive(Deserialize, Serialize)]
-pub struct GetTaskStatus;
+#[derive(Deserialize, Serialize, Default)]
+pub struct GetTaskStatus {
+    pub api_key: Option<String>,
+}
 
-impl Default for GetTaskStatus {
-    fn default() -> Self {
-        Self
+impl GetTaskStatus {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key: Some(api_key),
+        }
     }
 }
 
@@ -712,8 +743,13 @@ impl Tool for GetTaskStatus {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // 使用参数中的 API key
-        let client = CalphaMeshClient::new(args.api_key.clone());
+        // 获取 API key
+        let api_key = args
+            .api_key
+            .clone()
+            .or_else(|| self.api_key.clone())
+            .ok_or_else(|| CalphaMeshError::MissingParameter("api_key".to_string()))?;
+        let client = CalphaMeshClient::new(api_key);
         let task = client.get_task_status(args.task_id).await?;
 
         let mut result = format!(
@@ -741,12 +777,16 @@ impl Tool for GetTaskStatus {
 }
 
 // 列出任务工具
-#[derive(Deserialize, Serialize)]
-pub struct ListTasks;
+#[derive(Deserialize, Serialize, Default)]
+pub struct ListTasks {
+    pub api_key: Option<String>,
+}
 
-impl Default for ListTasks {
-    fn default() -> Self {
-        Self
+impl ListTasks {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key: Some(api_key),
+        }
     }
 }
 
@@ -779,8 +819,13 @@ impl Tool for ListTasks {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // 使用参数中的 API key
-        let client = CalphaMeshClient::new(args.api_key.clone());
+        // 获取 API key
+        let api_key = args
+            .api_key
+            .clone()
+            .or_else(|| self.api_key.clone())
+            .ok_or_else(|| CalphaMeshError::MissingParameter("api_key".to_string()))?;
+        let client = CalphaMeshClient::new(api_key);
         let list = client.list_tasks(args.page, args.items_per_page).await?;
 
         let mut result = format!("任务列表 (第{}页/共{}页)\n\n", list.page, list.total_pages);

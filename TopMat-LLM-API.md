@@ -290,7 +290,7 @@ Authorization: Bearer your_api_key_here
 |------|------|--------|------|
 | `limit` | integer | 20 | 每页数量 |
 | `offset` | integer | 0 | 偏移量 |
-| `conversation_id` | string | - | 按会话 ID 筛选 |
+| `model` | string | - | 按模型筛选 |
 | `search` | string | - | 搜索关键词 (标题或摘要) |
 
 **响应示例:**

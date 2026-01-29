@@ -166,26 +166,32 @@ pub async fn calphamesh(
     let user_api_key = _auth_user.api_key.clone();
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
-    let prompt = format!(
-        "你是一个专业的材料热力学计算助手，专门负责 CalphaMesh 模拟任务的管理。
+    let prompt = "你是一个专业的材料热力学计算助手，专门负责 CalphaMesh 模拟任务的管理。
 你的主要职责包括：
 1. **任务提交**：辅助用户提交点计算 (SubmitPointTask)、线计算 (SubmitLineTask) 和 Scheil 凝固模拟 (SubmitScheilTask)。请确保用户提供的组分 (composition) 总和为 1。
 2. **状态追踪**：使用 GetTaskStatus 查询特定任务的进度 and 结果。
 3. **任务管理**：使用 ListTasks 列出用户的所有模拟任务。
-4. **密钥**：当调用任何 calphamesh 工具时，**必须**在参数中包含 'api_key' 字段,值为：{}。
-请为用户提供准确的计算建议，在调用工具前验证参数的合理性，并以专业、简洁的方式反馈模拟结果。",
-        user_api_key
-    );
+请为用户提供准确的计算建议，在调用工具前验证参数的合理性，并以专业、简洁的方式反馈模拟结果。";
 
     let mut agent_builder = qwen_client
         .agent("qwen-flash")
-        .preamble(&prompt)
+        .preamble(prompt)
         .temperature(0.8)
-        .tool(crate::server::mcp::tools::SubmitPointTask)
-        .tool(crate::server::mcp::tools::SubmitLineTask)
-        .tool(crate::server::mcp::tools::SubmitScheilTask)
-        .tool(crate::server::mcp::tools::GetTaskStatus)
-        .tool(crate::server::mcp::tools::ListTasks);
+        .tool(crate::server::mcp::tools::SubmitPointTask {
+            api_key: Some(user_api_key.clone()),
+        })
+        .tool(crate::server::mcp::tools::SubmitLineTask {
+            api_key: Some(user_api_key.clone()),
+        })
+        .tool(crate::server::mcp::tools::SubmitScheilTask {
+            api_key: Some(user_api_key.clone()),
+        })
+        .tool(crate::server::mcp::tools::GetTaskStatus {
+            api_key: Some(user_api_key.clone()),
+        })
+        .tool(crate::server::mcp::tools::ListTasks {
+            api_key: Some(user_api_key.clone()),
+        });
 
     // 如果请求中启用了思考模式，则添加 enable_reasoning 参数
     if request.enable_reasoning.unwrap_or(false) {
@@ -213,19 +219,15 @@ pub async fn phase_field(
     let user_api_key = _auth_user.api_key.clone();
     let api_key = "sk-348d7ca647714c52aca12ea106cfa895";
     let qwen_client = rig::providers::qwen::Client::new_with_api_key(api_key);
-    let prompt = format!(
-        "你是一个专业的相场模拟 (Phase Field) 专家助手，负责材料微观组织演化的数值模拟管理。
+    let prompt = "你是一个专业的相场模拟 (Phase Field) 专家助手，负责材料微观组织演化的数值模拟管理。
 你的主要职责包括：
 1. **模拟启动**：协助用户提交自发分解 (SubmitSpinodalDecompositionTask) 或物理气相沉积 (SubmitPvdSimulationTask) 模拟。
 2. **任务监控**：实时获取任务列表 (GetTaskList)、查询特定任务状态 (PhaseFieldGetTaskStatus) 或在必要时终止任务 (StopTask)。
 3. **数据检索**：对模拟生成的文件进行探测 (ProbeTaskFiles) 并下载关键结果文件 (RetrieveFile)。
-4. **密钥**：当调用任何 Phase Field 工具时，**必须**在参数中包含 'api_key' 字段,值为：{}。
-请引导用户正确配置模拟参数，确保模拟流程的完整性。在讨论模拟结果时，请结合物理背景提供深入的见解。",
-        user_api_key
-    );
+请引导用户正确配置模拟参数，确保模拟流程的完整性。在讨论模拟结果时，请结合物理背景提供深入的见解。";
     let mut agent_builder = qwen_client
         .agent("qwen-flash")
-        .preamble(&prompt)
+        .preamble(prompt)
         .temperature(0.8)
         .tool(crate::server::mcp::tools::SubmitSpinodalDecompositionTask)
         .tool(crate::server::mcp::tools::SubmitPvdSimulationTask)

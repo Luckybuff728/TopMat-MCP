@@ -225,8 +225,7 @@ impl Tool for ExperimentalDataReader {
             实测硬度: 3250 HV\n\
             实测附着力: 69 N\n\
             磨损率: 2.5×10⁻⁶ mm³/N·m\n\
-            热稳定性: 790°C\n\
-            备注: 性能接近但未完全达标，建议进一步优化",
+            热稳定性: 790°C",
             args.sample_id
         );
         println!("  ✓ 读取完成\n");

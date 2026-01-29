@@ -19,7 +19,7 @@ use crate::server::models::*;
     params(
         ("limit" = i64, Query, description = "分页大小，默认20，最大100"),
         ("offset" = i64, Query, description = "偏移量，默认0"),
-        ("conversation_id" = Option<String>, Query, description = "按会话ID筛选"),
+        ("model" = Option<String>, Query, description = "按模型筛选"),
         ("search" = Option<String>, Query, description = "搜索关键词（搜索标题和摘要）")
     ),
     responses(
@@ -38,45 +38,80 @@ pub async fn list_conversations_handler(
     Query(params): Query<ListConversationsQuery>,
 ) -> Result<Json<ConversationListResponse>, ErrorResponse> {
     info!(
-        "获取对话列表: limit={}, offset={}, user_id={}",
-        params.limit, params.offset, auth_user.user_id
+        "获取对话列表: limit={}, offset={}, user_id={}, search={:?}, model={:?}",
+        params.limit, params.offset, auth_user.user_id, params.search, params.model
     );
 
-    // 从认证信息中获取真实用户ID
     let user_id = auth_user.user_id as i64;
+    let pool = state.database.pool();
 
-    // 构建基本查询SQL - 使用PostgreSQL参数占位符
-    let base_sql = "SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at \
-         FROM conversations WHERE user_id = $1";
+    // 1. 构建查询条件和参数
+    let mut conditions = vec!["user_id = $1".to_string()];
+    let mut param_index = 2;
 
-    let (sql, _param_offset) = if params.search.is_some() {
-        (
-            format!(
-                "{} AND (title LIKE $2 OR summary LIKE $3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5",
-                base_sql
-            ),
-            2,
-        )
-    } else {
-        (
-            format!("{} ORDER BY updated_at DESC LIMIT $2 OFFSET $3", base_sql),
-            1,
-        )
-    };
-
-    // 执行查询
-    let mut query = sqlx::query(&sql);
-    query = query.bind(user_id);
-
-    if let Some(ref search) = params.search {
-        query = query.bind(format!("%{}%", search));
-        query = query.bind(format!("%{}%", search));
+    if params.search.is_some() {
+        conditions.push(format!(
+            "(title LIKE ${} OR summary LIKE ${})",
+            param_index,
+            param_index + 1
+        ));
+        param_index += 2;
     }
 
-    query = query.bind(params.limit);
-    query = query.bind(params.offset);
+    if params.model.is_some() {
+        conditions.push(format!("model = ${}", param_index));
+        param_index += 1;
+    }
 
-    let rows = query.fetch_all(state.database.pool()).await.map_err(|e| {
+    let where_clause = conditions.join(" AND ");
+
+    // 2. 查询符合条件的记录总数 (用于分页)
+    let count_sql = format!("SELECT COUNT(*) FROM conversations WHERE {}", where_clause);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql).bind(user_id);
+
+    if let Some(search) = &params.search {
+        let search_pattern = format!("%{}%", search);
+        count_query = count_query
+            .bind(search_pattern.clone())
+            .bind(search_pattern);
+    }
+    if let Some(model) = &params.model {
+        count_query = count_query.bind(model);
+    }
+
+    let total = count_query.fetch_one(pool).await.map_err(|e| {
+        error!("查询对话总数失败: {}", e);
+        ErrorResponse {
+            error: "database_error".to_string(),
+            message: "查询对话总数失败".to_string(),
+            details: Some(serde_json::json!({
+                "error": e.to_string()
+            })),
+            timestamp: chrono::Local::now(),
+        }
+    })?;
+
+    // 3. 查询分页数据
+    let select_sql = format!(
+        "SELECT conversation_id, user_id, title, model, message_count, summary, created_at, updated_at \
+         FROM conversations WHERE {} ORDER BY updated_at DESC LIMIT ${} OFFSET ${}",
+        where_clause,
+        param_index,
+        param_index + 1
+    );
+
+    let mut data_query = sqlx::query(&select_sql).bind(user_id);
+
+    if let Some(search) = &params.search {
+        let search_pattern = format!("%{}%", search);
+        data_query = data_query.bind(search_pattern.clone()).bind(search_pattern);
+    }
+    if let Some(model) = &params.model {
+        data_query = data_query.bind(model);
+    }
+    data_query = data_query.bind(params.limit).bind(params.offset);
+
+    let rows = data_query.fetch_all(pool).await.map_err(|e| {
         error!("查询对话列表失败: {}", e);
         ErrorResponse {
             error: "database_error".to_string(),
@@ -88,7 +123,7 @@ pub async fn list_conversations_handler(
         }
     })?;
 
-    // 转换为API模型
+    // 转换结果
     let conversations: Vec<Conversation> = rows
         .into_iter()
         .map(|row| Conversation {
@@ -102,35 +137,13 @@ pub async fn list_conversations_handler(
             message_count: Some(row.try_get::<i32, _>("message_count").unwrap_or(0)),
             summary: row.try_get::<Option<String>, _>("summary").ok().flatten(),
             created_at: row
-                .try_get::<chrono::DateTime<chrono::Local>, _>("created_at")
+                .try_get("created_at")
                 .unwrap_or_else(|_| chrono::Local::now()),
             updated_at: row
-                .try_get::<chrono::DateTime<chrono::Local>, _>("updated_at")
+                .try_get("updated_at")
                 .unwrap_or_else(|_| chrono::Local::now()),
         })
         .collect();
-
-    // 获取总数
-    let total_sql = "SELECT COUNT(*) FROM conversations WHERE user_id = $1";
-    let mut total_query = sqlx::query(total_sql);
-    total_query = total_query.bind(user_id);
-
-    let total_row = total_query
-        .fetch_one(state.database.pool())
-        .await
-        .map_err(|e| {
-            error!("查询对话总数失败: {}", e);
-            ErrorResponse {
-                error: "database_error".to_string(),
-                message: "查询对话总数失败".to_string(),
-                details: Some(serde_json::json!({
-                    "error": e.to_string()
-                })),
-                timestamp: chrono::Local::now(),
-            }
-        })?;
-
-    let total: i64 = total_row.try_get::<i64, _>(0).unwrap_or(0);
 
     let page_size = params.limit.clamp(1, 100);
     let page = (params.offset / page_size) + 1;

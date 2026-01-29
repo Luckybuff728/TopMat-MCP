@@ -263,7 +263,7 @@ where
                 }
 
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result })) => {
-                    info!("McpAgent: 收到工具响应: {} - {}", id, result);
+                    info!("McpAgent: 收到工具响应: {} - {}", id, result.chars().take(20).collect::<String>());
 
                     // 尝试将结果字符串解析为 JSON，避免双重转义
                     let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));

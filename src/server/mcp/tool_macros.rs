@@ -110,23 +110,23 @@ macro_rules! register_all_mcp_tools {
             // Calpha Mesh 工具
             SubmitPointTask {
                 args_type: PointTaskParams,
-                constructor: SubmitPointTask
+                constructor: SubmitPointTask::default()
             },
             SubmitLineTask {
                 args_type: LineTaskParams,
-                constructor: SubmitLineTask
+                constructor: SubmitLineTask::default()
             },
             SubmitScheilTask {
                 args_type: ScheilTaskParams,
-                constructor: SubmitScheilTask
+                constructor: SubmitScheilTask::default()
             },
             GetTaskStatus {
                 args_type: TaskIdParams,
-                constructor: GetTaskStatus
+                constructor: GetTaskStatus::default()
             },
             ListTasks {
                 args_type: ListTasksParams,
-                constructor: ListTasks
+                constructor: ListTasks::default()
             },
             // ONNX Service 工具
             // OnnxHealthCheck {

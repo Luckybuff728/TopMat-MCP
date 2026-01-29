@@ -1261,21 +1261,6 @@ where
                                 else if !function.arguments.is_empty() {
                                     // 获取现有工具调用
                                     if let Some((id, name, existing_args)) = calls.get(&tool_call.index) {
-                                        // 计算增量参数（通义千问的 arguments 可能是累积的）
-                                        let incremental_args = if function.arguments.starts_with(existing_args) {
-                                            // arguments 是累积的，计算增量
-                                            &function.arguments[existing_args.len()..]
-                                        } else {
-                                            // arguments 是新的增量片段
-                                            &function.arguments
-                                        };
-
-                                        // 如果增量参数不为空，yield 为文本（这样用户能看到工具调用的参数流式输出）
-                                        if !incremental_args.is_empty() {
-                                            // 将工具调用参数作为文本流式输出，让用户能看到
-                                            yield Ok(crate::streaming::RawStreamingChoice::Message(incremental_args.to_string()));
-                                        }
-
                                         // 合并参数
                                         let combined = if function.arguments.starts_with(existing_args) {
                                             function.arguments.clone()
@@ -1285,12 +1270,6 @@ where
                                         // 更新工具调用映射
                                         calls.insert(tool_call.index, (id.clone(), name.clone(), combined));
                                     } else {
-                                        // 工具调用还没开始，但已经有参数了（可能函数名在前面的消息中）
-                                        // 先 yield 参数作为文本
-                                        if !function.arguments.is_empty() {
-                                            yield Ok(crate::streaming::RawStreamingChoice::Message(function.arguments.clone()));
-                                        }
-
                                         // 尝试从 ID 或索引创建工具调用映射
                                         let id = tool_call.id.clone().unwrap_or_else(|| format!("call_{}", tool_call.index));
                                         let name = function.name.clone().unwrap_or_else(|| String::from("unknown"));

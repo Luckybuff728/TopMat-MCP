@@ -348,8 +348,8 @@ pub struct ListConversationsQuery {
     /// 偏移量，默认0
     #[serde(default)]
     pub offset: i64,
-    /// 按会话ID筛选（可选）
-    pub conversation_id: Option<String>,
+    /// 按模型筛选（可选）
+    pub model: Option<String>,
     /// 搜索关键词
     pub search: Option<String>,
 }
