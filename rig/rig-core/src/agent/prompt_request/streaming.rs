@@ -287,66 +287,95 @@ where
                                 gen_ai.tool.call.arguments = tracing::field::Empty,
                                 gen_ai.tool.call.result = tracing::field::Empty
                             );
+                            let _tool_guard = tool_span.enter();
 
                             // 首先推送工具调用事件到流中
                             yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolCall(tool_call.clone())));
 
-                            let res = async {
-                                let tool_span = tracing::Span::current();
-                                if let Some(ref hook) = self.hook {
-                                    hook.on_tool_call(&tool_call.function.name, &tool_call.function.arguments.to_string(), cancel_signal.clone()).await;
-                                    if cancel_signal.is_cancelled() {
-                                        return Err((StreamingError::Prompt(PromptError::prompt_cancelled(chat_history.read().await.to_vec()).into()), None as Option<(String, String)>));
-                                    }
+                            // Call hook before tool execution
+                            if let Some(ref hook) = self.hook {
+                                hook.on_tool_call(&tool_call.function.name, &tool_call.function.arguments.to_string(), cancel_signal.clone()).await;
+                                if cancel_signal.is_cancelled() {
+                                    yield Err(StreamingError::Prompt(PromptError::prompt_cancelled(chat_history.read().await.to_vec()).into()));
+                                    continue;
                                 }
+                            }
 
-                                tool_span.record("gen_ai.tool.name", &tool_call.function.name);
-                                tool_span.record("gen_ai.tool.call.arguments", tool_call.function.arguments.to_string());
+                            tool_span.record("gen_ai.tool.name", &tool_call.function.name);
+                            tool_span.record("gen_ai.tool.call.arguments", tool_call.function.arguments.to_string());
 
-                                let tool_result = match
-                                agent.tool_server_handle.call_tool(&tool_call.function.name, &tool_call.function.arguments.to_string()).await {
-                                    Ok(thing) => thing,
+                            // Create a channel for streaming tool output
+                            let (tool_stream_tx, mut tool_stream_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+                            // Clone what we need for the spawned task
+                            let tool_name = tool_call.function.name.clone();
+                            let tool_args = tool_call.function.arguments.to_string();
+                            let tool_server_handle = agent.tool_server_handle.clone();
+
+                            // Spawn the tool call in a separate task so we can poll streams concurrently
+                            let tool_future = tokio::spawn(async move {
+                                match tool_server_handle.call_tool_with_stream(&tool_name, &tool_args, tool_stream_tx).await {
+                                    Ok(result) => result,
                                     Err(e) => {
                                         tracing::warn!("Error while calling tool: {e}");
                                         e.to_string()
                                     }
-                                };
+                                }
+                            });
 
-                                tool_span.record("gen_ai.tool.call.result", &tool_result);
-
-                                if let Some(ref hook) = self.hook {
-                                    hook.on_tool_result(&tool_call.function.name, &tool_call.function.arguments.to_string(), &tool_result.to_string(), cancel_signal.clone())
-                                    .await;
-
-                                    if cancel_signal.is_cancelled() {
-                                        return Err((StreamingError::Prompt(PromptError::prompt_cancelled(chat_history.read().await.to_vec()).into()), None as Option<(String, String)>));
+                            // Poll both the tool stream and tool future concurrently
+                            let mut tool_future = Box::pin(tool_future);
+                            let tool_result = loop {
+                                tokio::select! {
+                                    biased;
+                                    // Prioritize receiving stream chunks
+                                    Some(chunk) = tool_stream_rx.recv() => {
+                                        // Yield intermediate text chunks from the sub-agent in real-time
+                                        yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(Text { text: chunk })));
+                                    }
+                                    result = &mut tool_future => {
+                                        // Drain any remaining chunks
+                                        while let Ok(chunk) = tool_stream_rx.try_recv() {
+                                            yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(Text { text: chunk })));
+                                        }
+                                        // Return the tool result
+                                        break match result {
+                                            Ok(res) => res,
+                                            Err(e) => {
+                                                tracing::warn!("Tool task panicked: {e}");
+                                                e.to_string()
+                                            }
+                                        };
                                     }
                                 }
+                            };
 
-                                let tool_call_id = tool_call.id.clone();
-                                let tool_call_msg = AssistantContent::ToolCall(tool_call.clone());
+                            tool_span.record("gen_ai.tool.call.result", &tool_result);
 
-                                tool_calls.push(tool_call_msg);
-                                tool_results.push((tool_call_id.clone(), tool_call.call_id, tool_result.clone()));
-                                // tracing::info!("工具调用结果 {}", tool_result);
+                            // Call hook after tool execution
+                            if let Some(ref hook) = self.hook {
+                                hook.on_tool_result(&tool_call.function.name, &tool_call.function.arguments.to_string(), &tool_result.to_string(), cancel_signal.clone())
+                                .await;
 
-                                did_call_tool = true;
-                                Ok((tool_call_id, tool_result))
-                                // break;
-                            }.instrument(tool_span).await;
-
-                            match res {
-                                Ok((tool_id, tool_result)) => {
-                                    // 推送工具结果到流中
-                                    yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolResult {
-                                        id: tool_id,
-                                        result: tool_result
-                                    }));
-                                }
-                                Err((e, _)) => {
-                                    yield Err(e);
+                                if cancel_signal.is_cancelled() {
+                                    yield Err(StreamingError::Prompt(PromptError::prompt_cancelled(chat_history.read().await.to_vec()).into()));
+                                    continue;
                                 }
                             }
+
+                            let tool_call_id = tool_call.id.clone();
+                            let tool_call_msg = AssistantContent::ToolCall(tool_call.clone());
+
+                            tool_calls.push(tool_call_msg);
+                            tool_results.push((tool_call_id.clone(), tool_call.call_id, tool_result.clone()));
+
+                            did_call_tool = true;
+
+                            // 推送工具结果到流中
+                            yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolResult {
+                                id: tool_call_id,
+                                result: tool_result
+                            }));
                         },
                         Ok(StreamedAssistantContent::ToolCallDelta { id, delta }) => {
                             if let Some(ref hook) = self.hook {

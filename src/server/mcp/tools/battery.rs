@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
 
-const BATTERY_API_BASE_URL: &str = "http://139.159.198.14:20002/v1";
-// const BATTERY_API_BASE_URL: &str = "http://127.0.0.1:8000/v1";
+// const BATTERY_API_BASE_URL: &str = "http://139.159.198.14:20002/v1"; //生产环境
+const BATTERY_API_BASE_URL: &str = "http://192.168.7.102:8083/v1"; //测试环境
+// const BATTERY_API_BASE_URL: &str = "http://127.0.0.1:8000/v1"; //开发环境
 // ==================== 错误类型 ====================
 
 #[derive(Debug)]

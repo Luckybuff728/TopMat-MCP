@@ -21,6 +21,12 @@ use crate::{
     wasm_compat::{WasmBoxedFuture, WasmCompatSend, WasmCompatSync},
 };
 
+tokio::task_local! {
+    /// Task-local sender for streaming tool output back to the agent.
+    /// When set, tools can send intermediate text chunks through this channel.
+    pub static TOOL_STREAM_SENDER: tokio::sync::mpsc::UnboundedSender<String>;
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
     #[cfg(not(target_family = "wasm"))]

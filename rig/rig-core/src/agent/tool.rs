@@ -1,8 +1,10 @@
 use crate::{
     agent::Agent,
     completion::{CompletionModel, Prompt, PromptError, ToolDefinition},
-    tool::Tool,
+    streaming::{StreamedAssistantContent, StreamingPrompt},
+    tool::{TOOL_STREAM_SENDER, Tool},
 };
+use futures::StreamExt;
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +14,10 @@ pub struct AgentToolArgs {
     prompt: String,
 }
 
-impl<M: CompletionModel> Tool for Agent<M> {
+impl<M: CompletionModel + 'static> Tool for Agent<M>
+where
+    <M as CompletionModel>::StreamingResponse: Send + Sync,
+{
     const NAME: &'static str = "agent_tool";
 
     type Error = PromptError;
@@ -41,7 +46,39 @@ impl<M: CompletionModel> Tool for Agent<M> {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        self.prompt(args.prompt).await
+        // Check if there's a stream sender available in the task-local context
+        let maybe_sender = TOOL_STREAM_SENDER.try_with(|s| s.clone()).ok();
+
+        if let Some(sender) = maybe_sender {
+            // Use streaming: forward chunks to the sender
+            let mut stream = self.stream_prompt(&args.prompt).multi_turn(20).await;
+            let mut collected = String::new();
+
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(crate::agent::MultiTurnStreamItem::StreamItem(
+                        StreamedAssistantContent::Text(text),
+                    )) => {
+                        collected.push_str(&text.text);
+                        let _ = sender.send(text.text);
+                    }
+                    Ok(crate::agent::MultiTurnStreamItem::FinalResponse(res)) => {
+                        collected = res.response().to_string();
+                        break;
+                    }
+                    Err(e) => {
+                        return Err(PromptError::CompletionError(
+                            crate::completion::CompletionError::ResponseError(e.to_string()),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            Ok(collected)
+        } else {
+            // Fallback to non-streaming prompt
+            self.prompt(args.prompt).await
+        }
     }
 
     fn name(&self) -> String {

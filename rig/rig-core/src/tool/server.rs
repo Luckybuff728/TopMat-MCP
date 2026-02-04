@@ -132,8 +132,20 @@ impl ToolServer {
                     .send(ToolServerResponse::ToolDeleted)
                     .unwrap();
             }
-            ToolServerRequestMessageKind::CallTool { name, args } => {
-                match self.toolset.call(&name, args.clone()).await {
+            ToolServerRequestMessageKind::CallTool {
+                name,
+                args,
+                stream_sender,
+            } => {
+                let call_future = self.toolset.call(&name, args.clone());
+                let result = if let Some(sender) = stream_sender {
+                    crate::tool::TOOL_STREAM_SENDER
+                        .scope(sender, call_future)
+                        .await
+                } else {
+                    call_future.await
+                };
+                match result {
                     Ok(result) => {
                         let _ = callback_channel.send(ToolServerResponse::ToolExecuted { result });
                     }
@@ -278,6 +290,37 @@ impl ToolServerHandle {
                 data: ToolServerRequestMessageKind::CallTool {
                     name: tool_name.to_string(),
                     args: args.to_string(),
+                    stream_sender: None,
+                },
+            })
+            .await?;
+
+        let res = rx.await?;
+
+        match res {
+            ToolServerResponse::ToolExecuted { result, .. } => Ok(result),
+            ToolServerResponse::ToolError { error } => Err(ToolServerError::ToolsetError(
+                ToolSetError::ToolCallError(ToolError::ToolCallError(error.into())),
+            )),
+            invalid => Err(ToolServerError::InvalidMessage(invalid)),
+        }
+    }
+
+    pub async fn call_tool_with_stream(
+        &self,
+        tool_name: &str,
+        args: &str,
+        stream_sender: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<String, ToolServerError> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        self.0
+            .send(ToolServerRequest {
+                callback_channel: tx,
+                data: ToolServerRequestMessageKind::CallTool {
+                    name: tool_name.to_string(),
+                    args: args.to_string(),
+                    stream_sender: Some(stream_sender),
                 },
             })
             .await?;
@@ -324,9 +367,17 @@ pub struct ToolServerRequest {
 pub enum ToolServerRequestMessageKind {
     AddTool(Box<dyn ToolDyn>),
     AppendToolset(ToolSet),
-    RemoveTool { tool_name: String },
-    CallTool { name: String, args: String },
-    GetToolDefs { prompt: Option<String> },
+    RemoveTool {
+        tool_name: String,
+    },
+    CallTool {
+        name: String,
+        args: String,
+        stream_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    },
+    GetToolDefs {
+        prompt: Option<String>,
+    },
 }
 
 #[derive(PartialEq, Debug)]

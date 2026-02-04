@@ -68,16 +68,19 @@ cp .env.example .env
 
 # 使用 Docker Compose 启动
 docker build -t 192.168.7.102:5000/topmat-llm:latest -t 192.168.7.102:5000/topmat-llm:v1.0 .
-
+docker buildx build --provenance=false -t swr.cn-north-4.myhuaweicloud.com/dckj-dev/topmat-llm:latest .
+docker tag 192.168.7.102:5000/topmat-llm:latest swr.cn-north-4.myhuaweicloud.com/dckj-dev/topmat-llm:latest
 # 使用 Docker Compose 启动
 docker-compose up -d
 
 # 查看日志
 docker-compose logs -f topmat-llm
 
-# 推送到镜像仓库
+# 推送到镜像仓库（测试环境）
 docker push 192.168.7.102:5000/topmat-llm:latest
 
+# 推送到镜像仓库（生产环境）
+docker push swr.cn-north-4.myhuaweicloud.com/dckj-dev/topmat-llm:latest
 # 检查服务健康状态
 curl http://localhost:10007/health
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::server::agent::{coating_optimization, ollama, qwen};
+use crate::server::agent::{a2a, coating_optimization, ollama, qwen};
 use crate::server::models::{ChatRequest, ChatResponse, ErrorResponse};
 
 /// 模型路由器
@@ -70,6 +70,9 @@ impl ModelRouter {
         });
         router.register("battery", |db, req, auth_user| {
             Box::pin(qwen::battery(db, req, auth_user))
+        });
+        router.register("a2a", |db, req, auth_user| {
+            Box::pin(a2a::a2a_agent(db, req, auth_user))
         });
         router
     }
