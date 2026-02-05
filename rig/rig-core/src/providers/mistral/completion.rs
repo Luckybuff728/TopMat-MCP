@@ -571,7 +571,8 @@ where
                             id: tc.id.clone(),
                             name: tc.function.name.clone(),
                             arguments: tc.function.arguments.clone(),
-                             call_id: None
+                            call_id: None,
+                            is_agent: false,
                         })
                     }
                     message::AssistantContent::Reasoning(_) => {

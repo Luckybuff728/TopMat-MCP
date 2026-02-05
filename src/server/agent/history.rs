@@ -79,6 +79,25 @@ impl HistoryManager {
                             text: content_text,
                         })),
                     }),
+                    "tool" => {
+                        let is_agent = msg
+                            .metadata
+                            .as_ref()
+                            .and_then(|m| m.get("is_agent"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+
+                        if is_agent {
+                            Some(RigMessage::Assistant {
+                                id: None,
+                                content: rig::OneOrMany::one(AssistantContent::Text(Text {
+                                    text: content_text,
+                                })),
+                            })
+                        } else {
+                            None
+                        }
+                    }
                     // "system" 角色通常由 preamble 处理，这里暂不包含在历史中以避免冲突
                     // 或者可以根据需要将其合并到 preamble
                     _ => None,

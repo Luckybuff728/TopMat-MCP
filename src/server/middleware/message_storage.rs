@@ -212,6 +212,7 @@ async fn handle_normal_response(
                                         &result_str,
                                         context.user_id,
                                         &context.conversation_id,
+                                        false, // Default to false for non-streaming intermediate messages
                                     )
                                     .await
                                     {
@@ -319,15 +320,16 @@ async fn handle_streaming_response(
                                             let mut reasons = collected_reasoning.lock().await;
                                             reasons.push_str(reasoning);
                                         }
-                                        StreamChunk::ToolCall { id, name, arguments } => {
+                                        StreamChunk::ToolCall { id, name, arguments, is_agent } => {
                                             let mut tool_calls = collected_tool_calls.lock().await;
                                             tool_calls.push(serde_json::json!({
                                                 "id": id,
                                                 "name": name,
-                                                "arguments": arguments
+                                                "arguments": arguments,
+                                                "is_agent": is_agent
                                             }));
                                         }
-                                        StreamChunk::ToolResult { id, result } => {
+                                        StreamChunk::ToolResult { id, result, is_agent } => {
                                             // 1. 如果有待保存的助手内容，先“冲刷”保存当前的助手消息片段
                                             let content = {
                                                 let mut c = collected_content.lock().await;
@@ -349,11 +351,18 @@ async fn handle_streaming_response(
                                             };
 
                                             if !content.is_empty() || !reasoning.is_empty() || !tool_calls_list.is_empty() {
+                                                let mut is_agent_map = std::collections::HashMap::new();
                                                 let tool_call_info = if !tool_calls_list.is_empty() {
                                                     Some(tool_calls_list.iter().filter_map(|tc| {
                                                         let tc_id = tc.get("id")?.as_str()?.to_string();
                                                         let name = tc.get("name")?.as_str()?;
                                                         let args = tc.get("arguments")?.to_string();
+
+                                                        // 记录 is_agent 状态
+                                                        if let Some(is_ag) = tc.get("is_agent").and_then(|v| v.as_bool()) {
+                                                            is_agent_map.insert(tc_id.clone(), is_ag);
+                                                        }
+
                                                         Some(crate::server::models::ToolCallInfo {
                                                             id: tc_id,
                                                             call_type: "function".to_string(),
@@ -367,6 +376,11 @@ async fn handle_streaming_response(
                                                     None
                                                 };
 
+                                                let mut metadata = std::collections::HashMap::new();
+                                                if !is_agent_map.is_empty() {
+                                                    metadata.insert("is_agent_map".to_string(), serde_json::to_value(is_agent_map).unwrap_or_default());
+                                                }
+
                                                 let partial_resp = ChatResponse {
                                                     content: if content.is_empty() { None } else { Some(content) },
                                                     reasoning_content: if reasoning.is_empty() { None } else { Some(reasoning) },
@@ -375,7 +389,7 @@ async fn handle_streaming_response(
                                                     usage: None,
                                                     conversation_id: conversation_id.clone(),
                                                     timestamp: chrono::Local::now(),
-                                                    metadata: std::collections::HashMap::new(),
+                                                    metadata,
                                                 };
 
                                                 if let Err(e) = save_assistant_message(&db_clone, &partial_resp, user_id, &conversation_id).await {
@@ -384,16 +398,20 @@ async fn handle_streaming_response(
                                             }
 
                                             // 2. 保存该工具结果为一个独立消息 (role: tool)
-                                            if let Err(e) = save_tool_message(
-                                                &db_clone,
-                                                id,
-                                                &result.to_string(),
-                                                user_id,
-                                                &conversation_id,
-                                            ).await {
-                                                error!("Failed to save tool result message (ID: {}): {}", id, e);
-                                            } else {
-                                                debug!("MessageStorage: 已保存工具结果消息 (ID: {})", id);
+                                            // 如果是子智能体(is_agent=true)，其内容已经作为assistant消息flush了，不需要再保存
+                                            if !is_agent {
+                                                if let Err(e) = save_tool_message(
+                                                    &db_clone,
+                                                    id,
+                                                    &result.to_string(),
+                                                    user_id,
+                                                    &conversation_id,
+                                                    *is_agent,
+                                                ).await {
+                                                    error!("Failed to save tool result message (ID: {}): {}", id, e);
+                                                } else {
+                                                    debug!("MessageStorage: 已保存工具结果消息 (ID: {})", id);
+                                                }
                                             }
                                         }
                                         StreamChunk::Final { response } => {
@@ -429,10 +447,17 @@ async fn handle_streaming_response(
                     resp.reasoning_content = Some(reasoning.clone());
                 }
                 if !tool_calls.is_empty() {
+                    let mut is_agent_map = std::collections::HashMap::new();
                     resp.tool_calls = Some(tool_calls.iter().filter_map(|tc| {
                         let id = tc.get("id")?.as_str()?.to_string();
                         let name = tc.get("name")?.as_str()?;
                         let args = tc.get("arguments")?.to_string();
+
+                        // 记录 is_agent 状态
+                        if let Some(is_ag) = tc.get("is_agent").and_then(|v| v.as_bool()) {
+                            is_agent_map.insert(id.clone(), is_ag);
+                        }
+
                         Some(crate::server::models::ToolCallInfo {
                             id,
                             call_type: "function".to_string(),
@@ -442,14 +467,25 @@ async fn handle_streaming_response(
                             },
                         })
                     }).collect());
+
+                    if !is_agent_map.is_empty() {
+                        resp.metadata.insert("is_agent_map".to_string(), serde_json::to_value(is_agent_map).unwrap_or_default());
+                    }
                 }
                 resp
             } else {
+                let mut is_agent_map = std::collections::HashMap::new();
                 let tool_call_info = if !tool_calls.is_empty() {
                     Some(tool_calls.iter().filter_map(|tc| {
                         let id = tc.get("id")?.as_str()?.to_string();
                         let name = tc.get("name")?.as_str()?;
                         let args = tc.get("arguments")?.to_string();
+
+                        // 记录 is_agent 状态
+                        if let Some(is_ag) = tc.get("is_agent").and_then(|v| v.as_bool()) {
+                            is_agent_map.insert(id.clone(), is_ag);
+                        }
+
                         Some(crate::server::models::ToolCallInfo {
                             id,
                             call_type: "function".to_string(),
@@ -463,6 +499,11 @@ async fn handle_streaming_response(
                     None
                 };
 
+                let mut metadata_map = std::collections::HashMap::new();
+                if !is_agent_map.is_empty() {
+                    metadata_map.insert("is_agent_map".to_string(), serde_json::to_value(is_agent_map).unwrap_or_default());
+                }
+
                 ChatResponse {
                     content: if content.is_empty() { None } else { Some(content.clone()) },
                     reasoning_content: if reasoning.is_empty() { None } else { Some(reasoning.clone()) },
@@ -471,7 +512,7 @@ async fn handle_streaming_response(
                     usage: None,
                     conversation_id: conversation_id.clone(),
                     timestamp: chrono::Local::now(),
-                    metadata: std::collections::HashMap::new(),
+                    metadata: metadata_map,
                 }
             };
 
@@ -612,6 +653,7 @@ async fn save_tool_message(
     content: &str,
     user_id: i64,
     conversation_id: &str,
+    is_agent: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 验证对话权限
     let conversation_exists: bool = sqlx::query_scalar(
@@ -630,17 +672,25 @@ async fn save_tool_message(
         .into());
     }
 
+    // 将 metadata 序列化为 JSON 字符串
+    let metadata_json = if is_agent {
+        Some(serde_json::json!({"is_agent": true}).to_string())
+    } else {
+        None
+    };
+
     // 保存工具消息
     sqlx::query(
         r#"
-        INSERT INTO messages (conversation_id, role, content, tool_call_id, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO messages (conversation_id, role, content, tool_call_id, metadata, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
         "#,
     )
     .bind(conversation_id)
     .bind("tool")
     .bind(content)
     .bind(tool_call_id)
+    .bind(metadata_json)
     .execute(db.pool())
     .await?;
 
@@ -664,57 +714,65 @@ async fn ensure_conversation_exists(
     message: &str,
     model: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 检查对话是否存在
-    let conversation_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM conversations WHERE conversation_id = $1 AND user_id = $2",
-    )
-    .bind(conversation_id)
-    .bind(user_id)
-    .fetch_one(db.pool())
-    .await?;
-
-    if conversation_exists {
-        // 更新现有对话
-        sqlx::query(
-            "UPDATE conversations SET updated_at = NOW(), message_count = message_count + 1 WHERE conversation_id = $1 AND user_id = $2"
-        )
-        .bind(conversation_id)
-        .bind(user_id)
-        .execute(db.pool())
-        .await?;
-    } else {
-        // 先确保用户存在（避免外键约束违规）
-        let user_exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_one(db.pool())
+    // 检查对话归属（全局检查）
+    let existing_owner: Option<i64> =
+        sqlx::query_scalar("SELECT user_id FROM conversations WHERE conversation_id = $1")
+            .bind(conversation_id)
+            .fetch_optional(db.pool())
             .await?;
 
-        if !user_exists {
-            // 创建临时用户记录（将在认证缓存时被更新）
-            info!("MessageStorage: 用户 {} 不存在，创建临时用户记录", user_id);
+    if let Some(owner_id) = existing_owner {
+        if owner_id == user_id {
+            // 对话已存在且属于当前用户，更新最后活动时间
             sqlx::query(
-                r#"
+                "UPDATE conversations SET updated_at = NOW(), message_count = message_count + 1 WHERE conversation_id = $1",
+            )
+            .bind(conversation_id)
+            .execute(db.pool())
+            .await?;
+            return Ok(());
+        } else {
+            // 对话属于其他用户
+            return Err(format!(
+                "Access denied: Conversation {} belongs to another user",
+                conversation_id
+            )
+            .into());
+        }
+    }
+    // 对话不存在，创建新对话
+    // 先确保用户存在（避免外键约束违规）
+    let user_exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(db.pool())
+        .await?;
+
+    if !user_exists {
+        // 创建临时用户记录（将在认证缓存时被更新）
+        info!("MessageStorage: 用户 {} 不存在，创建临时用户记录", user_id);
+        sqlx::query(
+            r#"
                 INSERT INTO users (id, username, email, subscription_level, created_at, updated_at)
                 VALUES ($1, $2, $3, 'free', NOW(), NOW())
                 ON CONFLICT (id) DO NOTHING
                 "#,
-            )
-            .bind(user_id)
-            .bind(format!("user_{}", user_id))
-            .bind(format!("user_{}@temp.local", user_id))
-            .execute(db.pool())
-            .await?;
-        }
+        )
+        .bind(user_id)
+        .bind(format!("user_{}", user_id))
+        .bind(format!("user_{}@temp.local", user_id))
+        .execute(db.pool())
+        .await?;
+    }
 
-        // 创建新对话
-        let title = if message.chars().count() > 50 {
-            message.chars().take(50).collect::<String>() + "..."
-        } else {
-            message.to_string()
-        }
-        .replace('\n', " ");
+    // 创建新对话
+    let title = if message.chars().count() > 50 {
+        message.chars().take(50).collect::<String>() + "..."
+    } else {
+        message.to_string()
+    }
+    .replace('\n', " ");
 
-        sqlx::query(
+    sqlx::query(
             r#"
             INSERT INTO conversations (conversation_id, user_id, title, model, created_at, updated_at)
             VALUES ($1, $2, $3, $4, NOW(), NOW())
@@ -726,7 +784,5 @@ async fn ensure_conversation_exists(
         .bind(model)
         .execute(db.pool())
         .await?;
-    }
-
     Ok(())
 }

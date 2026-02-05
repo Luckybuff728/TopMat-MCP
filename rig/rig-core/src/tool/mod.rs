@@ -21,10 +21,31 @@ use crate::{
     wasm_compat::{WasmBoxedFuture, WasmCompatSend, WasmCompatSync},
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolStreamItem {
+    /// A text chunk from the sub-agent
+    Text(String),
+    /// A tool call made by the sub-agent
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+        is_agent: bool,
+    },
+    /// A tool result received by the sub-agent
+    ToolResult {
+        id: String,
+        result: String,
+        is_agent: bool,
+    },
+    /// A reasoning chunk from the sub-agent
+    Reasoning(String),
+}
+
 tokio::task_local! {
     /// Task-local sender for streaming tool output back to the agent.
-    /// When set, tools can send intermediate text chunks through this channel.
-    pub static TOOL_STREAM_SENDER: tokio::sync::mpsc::UnboundedSender<String>;
+    /// When set, tools can send intermediate stream items through this channel.
+    pub static TOOL_STREAM_SENDER: tokio::sync::mpsc::UnboundedSender<ToolStreamItem>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -128,6 +149,11 @@ pub trait Tool: Sized + WasmCompatSend + WasmCompatSync {
         &self,
         args: Self::Args,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + WasmCompatSend;
+
+    /// Returns true if the tool is an agent
+    fn is_agent(&self) -> bool {
+        false
+    }
 }
 
 /// Trait that represents an LLM tool that can be stored in a vector store and RAGged
@@ -164,6 +190,8 @@ pub trait ToolDyn: WasmCompatSend + WasmCompatSync {
     fn definition<'a>(&'a self, prompt: String) -> WasmBoxedFuture<'a, ToolDefinition>;
 
     fn call<'a>(&'a self, args: String) -> WasmBoxedFuture<'a, Result<String, ToolError>>;
+
+    fn is_agent(&self) -> bool;
 }
 
 impl<T: Tool> ToolDyn for T {
@@ -187,6 +215,10 @@ impl<T: Tool> ToolDyn for T {
                 Err(e) => Err(ToolError::JsonError(e)),
             }
         })
+    }
+
+    fn is_agent(&self) -> bool {
+        <Self as Tool>::is_agent(self)
     }
 }
 
@@ -336,6 +368,10 @@ pub mod rmcp {
                     .collect::<String>())
             })
         }
+
+        fn is_agent(&self) -> bool {
+            false
+        }
     }
 }
 
@@ -369,6 +405,13 @@ impl ToolType {
         match self {
             ToolType::Simple(tool) => tool.name(),
             ToolType::Embedding(tool) => tool.name(),
+        }
+    }
+
+    pub fn is_agent(&self) -> bool {
+        match self {
+            ToolType::Simple(tool) => tool.is_agent(),
+            ToolType::Embedding(tool) => tool.is_agent(),
         }
     }
 
@@ -430,6 +473,13 @@ impl ToolSet {
     /// Check if the toolset contains a tool with the given name
     pub fn contains(&self, toolname: &str) -> bool {
         self.tools.contains_key(toolname)
+    }
+
+    pub fn is_agent(&self, toolname: &str) -> bool {
+        self.tools
+            .get(toolname)
+            .map(|t| t.is_agent())
+            .unwrap_or(false)
     }
 
     /// Add a tool to the toolset

@@ -257,6 +257,8 @@ pub enum StreamChunk {
         name: String,
         /// 工具参数
         arguments: serde_json::Value,
+        /// 是否为子智能体
+        is_agent: bool,
     },
     /// 工具响应
     #[serde(rename = "tool_result")]
@@ -265,6 +267,8 @@ pub enum StreamChunk {
         id: String,
         /// 工具执行结果
         result: serde_json::Value,
+        /// 是否为子智能体
+        is_agent: bool,
     },
     /// 错误信息
     #[serde(rename = "error")]

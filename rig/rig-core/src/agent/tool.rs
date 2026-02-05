@@ -56,12 +56,37 @@ where
 
             while let Some(item) = stream.next().await {
                 match item {
-                    Ok(crate::agent::MultiTurnStreamItem::StreamItem(
-                        StreamedAssistantContent::Text(text),
-                    )) => {
-                        collected.push_str(&text.text);
-                        let _ = sender.send(text.text);
-                    }
+                    Ok(crate::agent::MultiTurnStreamItem::StreamItem(content)) => match content {
+                        StreamedAssistantContent::Text(text) => {
+                            collected.push_str(&text.text);
+                            let _ = sender.send(crate::tool::ToolStreamItem::Text(text.text));
+                        }
+                        StreamedAssistantContent::ToolCall(tool_call_indicator) => {
+                            let _ = sender.send(crate::tool::ToolStreamItem::ToolCall {
+                                id: tool_call_indicator.tool_call.id,
+                                name: tool_call_indicator.tool_call.function.name,
+                                arguments: tool_call_indicator.tool_call.function.arguments,
+                                is_agent: tool_call_indicator.is_agent,
+                            });
+                        }
+                        StreamedAssistantContent::ToolResult {
+                            id,
+                            result,
+                            is_agent,
+                        } => {
+                            let _ = sender.send(crate::tool::ToolStreamItem::ToolResult {
+                                id,
+                                result,
+                                is_agent,
+                            });
+                        }
+                        StreamedAssistantContent::Reasoning(reasoning) => {
+                            let _ = sender.send(crate::tool::ToolStreamItem::Reasoning(
+                                reasoning.reasoning.join("\n"),
+                            ));
+                        }
+                        _ => {}
+                    },
                     Ok(crate::agent::MultiTurnStreamItem::FinalResponse(res)) => {
                         collected = res.response().to_string();
                         break;
@@ -71,7 +96,6 @@ where
                             crate::completion::CompletionError::ResponseError(e.to_string()),
                         ));
                     }
-                    _ => {}
                 }
             }
             Ok(collected)
@@ -79,6 +103,10 @@ where
             // Fallback to non-streaming prompt
             self.prompt(args.prompt).await
         }
+    }
+
+    fn is_agent(&self) -> bool {
+        true
     }
 
     fn name(&self) -> String {

@@ -10,6 +10,7 @@ use rig::streaming::{StreamingChat, StreamingPrompt};
 use tracing::{info, warn};
 
 use crate::server::mcp::McpAgent;
+use crate::server::mcp::tools::HITL_SIGNAL_WAIT_FOR_USER;
 use crate::server::models::*;
 
 /// 统一的 Agent 包装类型，用于类型擦除 McpAgent 的泛型参数
@@ -249,31 +250,82 @@ where
         while let Some(item) = stream.next().await {
             stream_items_processed += 1;
             match item {
-                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolCall(tool_call))) => {
-                    info!("McpAgent: 收到工具调用: {}: {}({})",
-                        tool_call.id, tool_call.function.name, tool_call.function.arguments);
+                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolCall(tool_call_indicator))) => {
+                    let tool_call = tool_call_indicator.tool_call;
+                    info!("McpAgent: 收到工具调用: {}: {}({}){}",
+                        tool_call.id, tool_call.function.name, tool_call.function.arguments,
+                        if tool_call_indicator.is_agent { " (Agent)" } else { "" });
 
+                    // 特殊处理 RequestConfirmation 工具：将其参数作为普通文本发送并保存，不发送工具调用事件
+                    if tool_call.function.name == "request_confirmation" {
+                        if let Some(summary) = tool_call.function.arguments.get("plan_summary").and_then(|v| v.as_str()) {
+                            collected_content.push_str(summary);
+                            let chunk = StreamChunk::Text {
+                                text: summary.to_string(),
+                                finished: false,
+                            };
+                            let event_data = serde_json::to_string(&chunk).unwrap_or_default();
+                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                            continue;
+                        }
+                    }
+
+                    // // 如果是子智能体，跳过发送工具调用事件
+                    // if !tool_call_indicator.is_agent {
                     let chunk = StreamChunk::ToolCall {
                         id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
-                        arguments: serde_json::to_value(&tool_call.function).unwrap_or_default(),
+                        arguments: tool_call.function.arguments.clone(),
+                        is_agent: tool_call_indicator.is_agent,
                     };
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
                     yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                    // }
                 }
 
-                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result })) => {
+                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result, is_agent })) => {
                     info!("McpAgent: 收到工具响应: {} - {}", id, result.chars().take(20).collect::<String>());
 
-                    // 尝试将结果字符串解析为 JSON，避免双重转义
-                    let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+                    // 检测 HITL 中断信号
+                    if result.contains(HITL_SIGNAL_WAIT_FOR_USER) {
+                        info!("McpAgent: 检测到 HITL 中断信号，停止 multi_turn 循环");
 
-                    let chunk = StreamChunk::ToolResult {
-                        id: id.clone(),
-                        result: result_value,
-                    };
-                    let event_data = serde_json::to_string(&chunk).unwrap_or_default();
-                    yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                        // 构造一个中间状态的 ChatResponse 发送给前端，格式与最终响应一致
+                        let chat_response = ChatResponse {
+                            content: if collected_content.is_empty() { None } else { Some(collected_content.clone()) },
+                            reasoning_content: None,
+                            tool_calls: None,
+                            model: model.clone(),
+                            usage: Some(TokenUsage {
+                                prompt_tokens: 0,
+                                completion_tokens: 0,
+                                total_tokens: 0,
+                            }),
+                            conversation_id: conversation_id.clone()
+                                .unwrap_or_else(crate::server::models::generate_conversation_id),
+                            timestamp: chrono::Local::now(),
+                            metadata: HashMap::new(),
+                        };
+
+                        let chunk = StreamChunk::Final { response: chat_response };
+                        let event_data = serde_json::to_string(&chunk).unwrap_or_default();
+                        yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                        break;
+                    }
+
+                    // 如果是子智能体，跳过发送工具结果事件，因为其内容已经作为普通文本流式传输并收集
+                    if !is_agent {
+                        // 尝试将结果字符串解析为 JSON，避免双重转义
+                        let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+
+                        let chunk = StreamChunk::ToolResult {
+                            id: id.clone(),
+                            result: result_value,
+                            is_agent: is_agent,
+                        };
+                        let event_data = serde_json::to_string(&chunk).unwrap_or_default();
+                        yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                    }
                 }
 
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::Text(text))) => {
@@ -401,31 +453,82 @@ where
         while let Some(item) = stream.next().await {
             stream_items_processed += 1;
             match item {
-                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolCall(tool_call))) => {
-                    info!("McpAgent: 收到工具调用: {}: {}({})",
-                        tool_call.id, tool_call.function.name, tool_call.function.arguments);
+                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolCall(tool_call_indicator))) => {
+                    let tool_call = tool_call_indicator.tool_call;
+                    info!("McpAgent: 收到工具调用: {}: {}({}){}",
+                        tool_call.id, tool_call.function.name, tool_call.function.arguments,
+                        if tool_call_indicator.is_agent { " (Agent)" } else { "" });
 
+                    // 特殊处理 RequestConfirmation 工具：将其参数作为普通文本发送并保存，不发送工具调用事件
+                    if tool_call.function.name == "request_confirmation" {
+                        if let Some(summary) = tool_call.function.arguments.get("plan_summary").and_then(|v| v.as_str()) {
+                            collected_content.push_str(summary);
+                            let chunk = StreamChunk::Text {
+                                text: summary.to_string(),
+                                finished: false,
+                            };
+                            let event_data = serde_json::to_string(&chunk).unwrap_or_default();
+                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                            continue;
+                        }
+                    }
+
+                    // // 如果是子智能体，跳过发送工具调用事件
+                    // if !tool_call_indicator.is_agent {
                     let chunk = StreamChunk::ToolCall {
                         id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
-                        arguments: serde_json::to_value(&tool_call.function).unwrap_or_default(),
+                        arguments: tool_call.function.arguments.clone(),
+                        is_agent: tool_call_indicator.is_agent,
                     };
                     let event_data = serde_json::to_string(&chunk).unwrap_or_default();
                     yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                    // }
                 }
 
-                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result })) => {
+                Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::ToolResult { id, result, is_agent })) => {
                     info!("McpAgent: 收到工具响应: {} - {}", id, result);
 
-                    // 尝试将结果字符串解析为 JSON，避免双重转义
-                    let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+                    // 检测 HITL 中断信号
+                    if result.contains(HITL_SIGNAL_WAIT_FOR_USER) {
+                        info!("McpAgent: 检测到 HITL 中断信号，停止 multi_turn 循环");
 
-                    let chunk = StreamChunk::ToolResult {
-                        id: id.clone(),
-                        result: result_value,
-                    };
-                    let event_data = serde_json::to_string(&chunk).unwrap_or_default();
-                    yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                        // 构造一个中间状态的 ChatResponse 发送给前端，格式与最终响应一致
+                        let chat_response = ChatResponse {
+                            content: if collected_content.is_empty() { None } else { Some(collected_content.clone()) },
+                            reasoning_content: None,
+                            tool_calls: None,
+                            model: model.clone(),
+                            usage: Some(TokenUsage {
+                                prompt_tokens: 0,
+                                completion_tokens: 0,
+                                total_tokens: 0,
+                            }),
+                            conversation_id: conversation_id.clone()
+                                .unwrap_or_else(crate::server::models::generate_conversation_id),
+                            timestamp: chrono::Local::now(),
+                            metadata: HashMap::new(),
+                        };
+
+                        let chunk = StreamChunk::Final { response: chat_response };
+                        let event_data = serde_json::to_string(&chunk).unwrap_or_default();
+                        yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                        break;
+                    }
+
+                    // 如果是子智能体，跳过发送工具结果事件
+                    if !is_agent {
+                        // 尝试将结果字符串解析为 JSON，避免双重转义
+                        let result_value = serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+
+                        let chunk = StreamChunk::ToolResult {
+                            id: id.clone(),
+                            result: result_value,
+                            is_agent: is_agent,
+                        };
+                        let event_data = serde_json::to_string(&chunk).unwrap_or_default();
+                        yield Ok::<Event, std::convert::Infallible>(Event::default().data(event_data));
+                    }
                 }
 
                 Ok(rig::agent::MultiTurnStreamItem::StreamItem(rig::streaming::StreamedAssistantContent::Text(text))) => {

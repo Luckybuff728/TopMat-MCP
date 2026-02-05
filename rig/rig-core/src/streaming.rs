@@ -76,6 +76,7 @@ where
         call_id: Option<String>,
         name: String,
         arguments: serde_json::Value,
+        is_agent: bool,
     },
     /// A tool call partial/delta
     ToolCallDelta { id: String, delta: String },
@@ -246,6 +247,7 @@ where
                     name,
                     arguments,
                     call_id,
+                    is_agent,
                 } => {
                     // Keep track of each tool call to aggregate the final message later
                     // and pass it to the outer stream
@@ -259,11 +261,11 @@ where
                     });
                     if let Some(call_id) = call_id {
                         Poll::Ready(Some(Ok(StreamedAssistantContent::tool_call_with_call_id(
-                            id, call_id, name, arguments,
+                            id, call_id, name, arguments, is_agent,
                         ))))
                     } else {
                         Poll::Ready(Some(Ok(StreamedAssistantContent::tool_call(
-                            id, name, arguments,
+                            id, name, arguments, is_agent,
                         ))))
                     }
                 }
@@ -367,11 +369,13 @@ impl<R: Clone + Unpin + GetTokenUsage> Stream for StreamingResultDyn<R> {
                     name,
                     arguments,
                     call_id,
+                    is_agent,
                 } => Poll::Ready(Some(Ok(RawStreamingChoice::ToolCall {
                     id,
                     name,
                     arguments,
                     call_id,
+                    is_agent,
                 }))),
             },
         }
@@ -403,8 +407,8 @@ where
                 let res = agent
                     .tool_server_handle
                     .call_tool(
-                        &tool_call.function.name,
-                        &tool_call.function.arguments.to_string(),
+                        &tool_call.tool_call.function.name,
+                        &tool_call.tool_call.function.arguments.to_string(),
                     )
                     .await
                     .map_err(|x| std::io::Error::other(x.to_string()))?;
@@ -514,6 +518,9 @@ mod tests {
                     print!("{reasoning}");
                     std::io::Write::flush(&mut std::io::stdout()).unwrap();
                 }
+                Ok(StreamedAssistantContent::ToolResult { id, result, .. }) => {
+                    println!("\nTool Result: {id} - {result}");
+                }
                 Err(e) => {
                     eprintln!("Error: {e:?}");
                     break;
@@ -554,11 +561,27 @@ mod tests {
 #[serde(untagged)]
 pub enum StreamedAssistantContent<R> {
     Text(Text),
-    ToolCall(ToolCall),
-    ToolCallDelta { id: String, delta: String },
-    ToolResult { id: String, result: String },
+    ToolCall(ToolCallWithAgentIndicator),
+    ToolCallDelta {
+        id: String,
+        delta: String,
+    },
+    ToolResult {
+        id: String,
+        result: String,
+        #[serde(default)]
+        is_agent: bool,
+    },
     Reasoning(Reasoning),
     Final(R),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct ToolCallWithAgentIndicator {
+    #[serde(flatten)]
+    pub tool_call: ToolCall,
+    #[serde(default)]
+    pub is_agent: bool,
 }
 
 impl<R> StreamedAssistantContent<R>
@@ -576,14 +599,18 @@ where
         id: impl Into<String>,
         name: impl Into<String>,
         arguments: serde_json::Value,
+        is_agent: bool,
     ) -> Self {
-        Self::ToolCall(ToolCall {
-            id: id.into(),
-            call_id: None,
-            function: ToolFunction {
-                name: name.into(),
-                arguments,
+        Self::ToolCall(ToolCallWithAgentIndicator {
+            tool_call: ToolCall {
+                id: id.into(),
+                call_id: None,
+                function: ToolFunction {
+                    name: name.into(),
+                    arguments,
+                },
             },
+            is_agent,
         })
     }
 
@@ -592,14 +619,18 @@ where
         call_id: String,
         name: impl Into<String>,
         arguments: serde_json::Value,
+        is_agent: bool,
     ) -> Self {
-        Self::ToolCall(ToolCall {
-            id: id.into(),
-            call_id: Some(call_id),
-            function: ToolFunction {
-                name: name.into(),
-                arguments,
+        Self::ToolCall(ToolCallWithAgentIndicator {
+            tool_call: ToolCall {
+                id: id.into(),
+                call_id: Some(call_id),
+                function: ToolFunction {
+                    name: name.into(),
+                    arguments,
+                },
             },
+            is_agent,
         })
     }
 

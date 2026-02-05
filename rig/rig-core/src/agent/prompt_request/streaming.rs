@@ -276,7 +276,10 @@ where
                             yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(text)));
                             did_call_tool = false;
                         },
-                        Ok(StreamedAssistantContent::ToolCall(tool_call)) => {
+                        Ok(StreamedAssistantContent::ToolCall(mut tool_call_indicator)) => {
+                            let is_agent = agent.tool_server_handle.is_agent(&tool_call_indicator.tool_call.function.name).await.unwrap_or(false);
+                            tool_call_indicator.is_agent = is_agent;
+                            let tool_call = &tool_call_indicator.tool_call;
                             let tool_span = tracing::debug_span!(
                                 parent: tracing::Span::current(),
                                 "execute_tool",
@@ -290,7 +293,7 @@ where
                             let _tool_guard = tool_span.enter();
 
                             // 首先推送工具调用事件到流中
-                            yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolCall(tool_call.clone())));
+                            yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolCall(tool_call_indicator.clone())));
 
                             // Call hook before tool execution
                             if let Some(ref hook) = self.hook {
@@ -305,7 +308,7 @@ where
                             tool_span.record("gen_ai.tool.call.arguments", tool_call.function.arguments.to_string());
 
                             // Create a channel for streaming tool output
-                            let (tool_stream_tx, mut tool_stream_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                            let (tool_stream_tx, mut tool_stream_rx) = tokio::sync::mpsc::unbounded_channel::<crate::tool::ToolStreamItem>();
 
                             // Clone what we need for the spawned task
                             let tool_name = tool_call.function.name.clone();
@@ -329,14 +332,47 @@ where
                                 tokio::select! {
                                     biased;
                                     // Prioritize receiving stream chunks
-                                    Some(chunk) = tool_stream_rx.recv() => {
-                                        // Yield intermediate text chunks from the sub-agent in real-time
-                                        yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(Text { text: chunk })));
+                                    Some(item) = tool_stream_rx.recv() => {
+                                        match item {
+                                            crate::tool::ToolStreamItem::Text(chunk) => {
+                                                yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(Text { text: chunk })));
+                                            }
+                                            crate::tool::ToolStreamItem::ToolCall { id, name, arguments, is_agent } => {
+                                                yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::tool_call(id, name, arguments, is_agent)));
+                                            }
+                                            crate::tool::ToolStreamItem::ToolResult { id, result, is_agent } => {
+                                                yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolResult { id, result, is_agent }));
+                                            }
+                                            crate::tool::ToolStreamItem::Reasoning(reasoning) => {
+                                                yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Reasoning(rig::message::Reasoning {
+                                                    reasoning: vec![reasoning],
+                                                    id: None,
+                                                    signature: None,
+                                                })));
+                                            }
+                                        }
                                     }
                                     result = &mut tool_future => {
                                         // Drain any remaining chunks
-                                        while let Ok(chunk) = tool_stream_rx.try_recv() {
-                                            yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(Text { text: chunk })));
+                                        while let Ok(item) = tool_stream_rx.try_recv() {
+                                            match item {
+                                                crate::tool::ToolStreamItem::Text(chunk) => {
+                                                    yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Text(Text { text: chunk })));
+                                                }
+                                                crate::tool::ToolStreamItem::ToolCall { id, name, arguments, is_agent } => {
+                                                    yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::tool_call(id, name, arguments, is_agent)));
+                                                }
+                                                crate::tool::ToolStreamItem::ToolResult { id, result, is_agent } => {
+                                                    yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolResult { id, result, is_agent }));
+                                                }
+                                                crate::tool::ToolStreamItem::Reasoning(reasoning) => {
+                                                    yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::Reasoning(rig::message::Reasoning {
+                                                        reasoning: vec![reasoning],
+                                                        id: None,
+                                                        signature: None,
+                                                    })));
+                                                }
+                                            }
                                         }
                                         // Return the tool result
                                         break match result {
@@ -352,7 +388,7 @@ where
 
                             tool_span.record("gen_ai.tool.call.result", &tool_result);
 
-                            // Call hook after tool execution
+                             // Call hook after tool execution
                             if let Some(ref hook) = self.hook {
                                 hook.on_tool_result(&tool_call.function.name, &tool_call.function.arguments.to_string(), &tool_result.to_string(), cancel_signal.clone())
                                 .await;
@@ -367,14 +403,15 @@ where
                             let tool_call_msg = AssistantContent::ToolCall(tool_call.clone());
 
                             tool_calls.push(tool_call_msg);
-                            tool_results.push((tool_call_id.clone(), tool_call.call_id, tool_result.clone()));
+                            tool_results.push((tool_call_id.clone(), tool_call.call_id.clone(), tool_result.clone()));
 
                             did_call_tool = true;
 
                             // 推送工具结果到流中
                             yield Ok(MultiTurnStreamItem::stream_item(StreamedAssistantContent::ToolResult {
                                 id: tool_call_id,
-                                result: tool_result
+                                result: tool_result,
+                                is_agent: tool_call_indicator.is_agent,
                             }));
                         },
                         Ok(StreamedAssistantContent::ToolCallDelta { id, delta }) => {
@@ -398,7 +435,7 @@ where
                             did_call_tool = false;
                         },
                         // 处理工具结果（不应该从提供商流中到达这里，只是为了完整性）
-                        Ok(StreamedAssistantContent::ToolResult { id: _, result: _ }) => {
+                        Ok(StreamedAssistantContent::ToolResult { id: _, result: _, is_agent: _ }) => {
                             // 工具结果应该在 Agent 层处理，不应该从提供商流中直接到达
                             // 这里只是为了编译完整性，实际不应该执行
                         },
@@ -504,10 +541,20 @@ pub async fn stream_to_stdout<R>(
     print!("Response: ");
     while let Some(content) = stream.next().await {
         match content {
-            Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolCall(tool_call))) => {
+            Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolCall(
+                tool_call_indicator,
+            ))) => {
+                let tool_call = &tool_call_indicator.tool_call;
                 println!(
-                    "\n[Tool call] {}: {}({})",
-                    tool_call.id, tool_call.function.name, tool_call.function.arguments
+                    "\n[Tool call] {}: {}({}){}",
+                    tool_call.id,
+                    tool_call.function.name,
+                    tool_call.function.arguments,
+                    if tool_call_indicator.is_agent {
+                        " (Agent)"
+                    } else {
+                        ""
+                    }
                 );
                 println!("Response: ");
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -516,6 +563,7 @@ pub async fn stream_to_stdout<R>(
             Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolResult {
                 id,
                 result,
+                is_agent: _,
             })) => {
                 println!("\n[Tool Result] {}: {}", id, result);
                 print!("Response: ");

@@ -375,6 +375,7 @@ fn handle_event(
                         id: tool_call.id,
                         arguments: json_value,
                         call_id: None,
+                        is_agent: false,
                     })),
                     Err(e) => Some(Err(CompletionError::from(e))),
                 }

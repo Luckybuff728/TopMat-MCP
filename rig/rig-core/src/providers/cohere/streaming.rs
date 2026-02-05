@@ -228,7 +228,8 @@ where
                                     id: tc.0,
                                     name: tc.1,
                                     arguments: args,
-                                    call_id: None
+                                    call_id: None,
+                                    is_agent: false,
                                 });
 
                                 current_tool_call = None;

@@ -206,6 +206,7 @@ where
                                         name,
                                         arguments,
                                         call_id: None,
+                                        is_agent: false,
                                     });
                                 }
                             }
@@ -258,6 +259,7 @@ where
                 name,
                 arguments,
                 call_id: None,
+                is_agent: false,
             });
         }
 

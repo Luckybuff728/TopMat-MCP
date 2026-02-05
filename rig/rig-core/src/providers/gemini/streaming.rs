@@ -177,7 +177,8 @@ where
                                         name: function_call.name.clone(),
                                         id: function_call.name.clone(),
                                         arguments: function_call.args.clone(),
-                                        call_id: None
+                                        call_id: None,
+                                        is_agent: false,
                                     });
                                 },
                                 part => {

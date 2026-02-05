@@ -826,7 +826,8 @@ where
                                             id,
                                             name,
                                             arguments: arguments_json,
-                                            call_id: None
+                                            call_id: None,
+                                            is_agent: false,
                                         });
                                     }
                                 }
@@ -876,6 +877,7 @@ where
                 name,
                 arguments: arguments_json,
                 call_id: None,
+                is_agent: false,
             });
         }
 

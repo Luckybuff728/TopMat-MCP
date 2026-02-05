@@ -162,6 +162,12 @@ impl ToolServer {
                     .send(ToolServerResponse::ToolDefinitions(res))
                     .unwrap();
             }
+            ToolServerRequestMessageKind::IsAgent { name } => {
+                let is_agent = self.toolset.is_agent(&name);
+                callback_channel
+                    .send(ToolServerResponse::ToolIsAgent(is_agent))
+                    .unwrap();
+            }
         }
     }
 
@@ -310,7 +316,7 @@ impl ToolServerHandle {
         &self,
         tool_name: &str,
         args: &str,
-        stream_sender: tokio::sync::mpsc::UnboundedSender<String>,
+        stream_sender: tokio::sync::mpsc::UnboundedSender<crate::tool::ToolStreamItem>,
     ) -> Result<String, ToolServerError> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
@@ -357,6 +363,27 @@ impl ToolServerHandle {
 
         Ok(tooldefs)
     }
+
+    pub async fn is_agent(&self, tool_name: &str) -> Result<bool, ToolServerError> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        self.0
+            .send(ToolServerRequest {
+                callback_channel: tx,
+                data: ToolServerRequestMessageKind::IsAgent {
+                    name: tool_name.to_string(),
+                },
+            })
+            .await?;
+
+        let res = rx.await?;
+
+        let ToolServerResponse::ToolIsAgent(is_agent) = res else {
+            return Err(ToolServerError::InvalidMessage(res));
+        };
+
+        Ok(is_agent)
+    }
 }
 
 pub struct ToolServerRequest {
@@ -373,10 +400,13 @@ pub enum ToolServerRequestMessageKind {
     CallTool {
         name: String,
         args: String,
-        stream_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+        stream_sender: Option<tokio::sync::mpsc::UnboundedSender<crate::tool::ToolStreamItem>>,
     },
     GetToolDefs {
         prompt: Option<String>,
+    },
+    IsAgent {
+        name: String,
     },
 }
 
@@ -387,6 +417,7 @@ pub enum ToolServerResponse {
     ToolExecuted { result: String },
     ToolError { error: String },
     ToolDefinitions(Vec<ToolDefinition>),
+    ToolIsAgent(bool),
 }
 
 #[derive(Debug, thiserror::Error)]

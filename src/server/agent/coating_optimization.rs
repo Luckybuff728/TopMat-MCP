@@ -278,18 +278,20 @@ pub async fn coating_optimization(
                 }
                 Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolCall(tool_call))) => {
                     let chunk = StreamChunk::ToolCall {
-                        id: tool_call.id.clone(),
-                        name: tool_call.function.name.clone(),
-                        arguments: serde_json::to_value(&tool_call.function).unwrap_or_default(),
+                        id: tool_call.tool_call.id.clone(),
+                        name: tool_call.tool_call.function.name.clone(),
+                        arguments: tool_call.tool_call.function.arguments.clone(),
+                        is_agent: tool_call.is_agent,
                     };
                     if let Ok(data) = serde_json::to_string(&chunk) {
                         yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));
                     }
                 }
-                Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolResult { id, result })) => {
+                Ok(MultiTurnStreamItem::StreamItem(StreamedAssistantContent::ToolResult { id, result, is_agent })) => {
                      let chunk = StreamChunk::ToolResult {
                         id: id.clone(),
                         result: serde_json::from_str(&result).unwrap_or_else(|_| serde_json::Value::String(result.clone())),
+                        is_agent,
                     };
                     if let Ok(data) = serde_json::to_string(&chunk) {
                         yield Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(data));

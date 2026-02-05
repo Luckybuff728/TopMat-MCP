@@ -31,3 +31,5 @@ pub use battery::{
     TaskIdArgs as BatteryTaskIdArgs, TiannengSimulateArgs, TrainBatteryLstm, TrainingArgs,
     VariablesArgs,
 };
+pub mod confirmation;
+pub use confirmation::{HITL_SIGNAL_WAIT_FOR_USER, RequestConfirmation};

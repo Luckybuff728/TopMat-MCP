@@ -753,6 +753,7 @@ where
                                 name: tool_call.function.name,
                                 arguments: tool_call.function.arguments,
                                 call_id: None,
+                                is_agent: false,
                             };
                         }
                     }

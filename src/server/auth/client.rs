@@ -56,11 +56,17 @@ impl AuthClient {
         let auth_result = self.verify_with_external_service(api_key).await?;
 
         // 3. 将认证结果存储到本地缓存
-        if let Err(e) = self.save_to_cache(&auth_result, api_key).await {
-            error!("保存认证缓存失败: {}", e);
-            // 不影响认证结果，只记录错误
-        } else {
-            info!("认证信息已保存到本地缓存");
+        let mut auth_result = auth_result;
+        match self.save_to_cache(&auth_result, api_key).await {
+            Ok(local_id) => {
+                auth_result.user_info.id = local_id as u32;
+                auth_result.api_key_info.user.id = local_id as u32;
+                info!("认证信息已保存到本地缓存 (Local ID: {})", local_id);
+            }
+            Err(e) => {
+                error!("保存认证缓存失败: {}", e);
+                // 不影响认证结果，只记录错误
+            }
         }
 
         Ok(auth_result)
@@ -273,7 +279,7 @@ impl AuthClient {
         &self,
         auth_result: &AuthResult,
         api_key: &str,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<i64, sqlx::Error> {
         let mut tx = self.database.pool().begin().await?;
 
         // 检查用户是否已存在
@@ -400,7 +406,7 @@ impl AuthClient {
         }
 
         tx.commit().await?;
-        Ok(())
+        Ok(user_id)
     }
 
     /// 更新API密钥最后使用时间
@@ -441,4 +447,3 @@ pub struct AuthClientConfig {
     /// 请求超时时间
     pub timeout: Duration,
 }
-
