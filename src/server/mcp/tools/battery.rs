@@ -1,6 +1,7 @@
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use serde_json::Value;
 use std::error::Error as StdError;
 
 // const BATTERY_API_BASE_URL: &str = "http://139.159.198.14:20002/v1"; //生产环境
@@ -28,6 +29,33 @@ impl std::fmt::Display for BatteryToolError {
 }
 
 impl StdError for BatteryToolError {}
+
+fn normalize_generate_task_response(raw: &str) -> Result<String, BatteryToolError> {
+    let parsed: Value =
+        serde_json::from_str(raw).map_err(|e| BatteryToolError::JsonError(e.to_string()))?;
+
+    let task_id = parsed
+        .get("task_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| BatteryToolError::JsonError("响应缺少 task_id".to_string()))?;
+    let status = parsed
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("pending");
+    let message = parsed.get("message").cloned().unwrap_or(Value::Null);
+
+    let response = json!({
+        "task_id": task_id,
+        "status": status,
+        "message": message,
+        "workflow": "frontend_polling",
+        "next_action": "将 task_id 返回前端，前端轮询 GET /v1/analysis/tasks/{task_id} 获取进度与最终结果",
+        "status_endpoint": format!("/v1/analysis/tasks/{}", task_id),
+        "cancel_endpoint": format!("/v1/analysis/tasks/{}", task_id)
+    });
+
+    Ok(response.to_string())
+}
 
 // ==================== 请求/响应结构体 ====================
 
@@ -102,6 +130,25 @@ pub struct PredictionArgs {
 #[derive(Deserialize, Serialize, Debug, Default)]
 pub struct TaskIdArgs {
     pub task_id: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Default)]
+pub struct ElectrolyteFormulaArgs {
+    pub conductivities: Vec<f64>,
+    pub anion_ratios: Vec<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concentration: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_batch: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Default)]
+pub struct ElectrolytePredictArgs {
+    pub data: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Default)]
@@ -591,6 +638,60 @@ impl Tool for AnalyzeBatterySox {
     }
 }
 
+#[derive(Deserialize, Serialize, Default)]
+pub struct GenerateElectrolyteFormula;
+
+impl Tool for GenerateElectrolyteFormula {
+    const NAME: &'static str = "generate_electrolyte_formula";
+    type Error = BatteryToolError;
+    type Args = ElectrolyteFormulaArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "提交电解液配方生成任务（异步）。该工具只负责创建任务并返回 task_id，不负责轮询；轮询应由前端调用任务查询接口完成。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "conductivities": { "type": "array", "items": { "type": "number" }, "description": "电导率列表" },
+                    "anion_ratios": { "type": "array", "items": { "type": "number" }, "description": "阴离子比例列表" },
+                    "temperature": { "type": "number", "description": "温度 (°C)，默认 25" },
+                    "concentration": { "type": "number", "description": "浓度，默认 0.1" },
+                    "num_batch": { "type": "integer", "description": "批次数量，默认 2" },
+                    "batch_size": { "type": "integer", "description": "每批数量，默认 16" }
+                },
+                "required": ["conductivities", "anion_ratios"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let url = format!("{}/analysis/bamboo-mixer/generate/task", BATTERY_API_BASE_URL);
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(url)
+            .json(&args)
+            .send()
+            .await
+            .map_err(|e| BatteryToolError::HttpError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(BatteryToolError::ApiError {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            });
+        }
+
+        let raw = response
+            .text()
+            .await
+            .map_err(|e| BatteryToolError::HttpError(e.to_string()))?;
+        normalize_generate_task_response(&raw)
+    }
+}
+
 /// LSTM 训练任务
 #[derive(Deserialize, Serialize, Default)]
 pub struct TrainBatteryLstm;
@@ -728,6 +829,105 @@ impl Tool for PredictBatteryRul {
         let response = client
             .post(url)
             .json(&args)
+            .send()
+            .await
+            .map_err(|e| BatteryToolError::HttpError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(BatteryToolError::ApiError {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            });
+        }
+
+        Ok(response
+            .text()
+            .await
+            .map_err(|e| BatteryToolError::HttpError(e.to_string()))?)
+    }
+}
+
+#[derive(Deserialize, Serialize, Default)]
+pub struct PredictElectrolyteProperties;
+
+impl Tool for PredictElectrolyteProperties {
+    const NAME: &'static str = "predict_electrolyte_properties";
+    type Error = BatteryToolError;
+    type Args = ElectrolytePredictArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "根据配方预测电解液理化性质。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": { "type": "object" },
+                        "description": "配方数据列表"
+                    }
+                },
+                "required": ["data"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let url = format!("{}/analysis/bamboo-mixer/predict", BATTERY_API_BASE_URL);
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(url)
+            .json(&args)
+            .send()
+            .await
+            .map_err(|e| BatteryToolError::HttpError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(BatteryToolError::ApiError {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            });
+        }
+
+        Ok(response
+            .text()
+            .await
+            .map_err(|e| BatteryToolError::HttpError(e.to_string()))?)
+    }
+}
+
+#[derive(Deserialize, Serialize, Default)]
+pub struct DeleteElectrolyteTask;
+
+impl Tool for DeleteElectrolyteTask {
+    const NAME: &'static str = "delete_task";
+    type Error = BatteryToolError;
+    type Args = TaskIdArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "取消电解液配方生成任务。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string", "description": "任务 ID" }
+                },
+                "required": ["task_id"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let url = format!("{}/analysis/tasks/{}", BATTERY_API_BASE_URL, args.task_id);
+        let client = reqwest::Client::new();
+
+        let response = client
+            .delete(url)
             .send()
             .await
             .map_err(|e| BatteryToolError::HttpError(e.to_string()))?;

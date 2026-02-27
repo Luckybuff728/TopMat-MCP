@@ -23,13 +23,14 @@ pub use phase_field::{
 };
 pub mod battery;
 pub use battery::{
-    AnalyzeBatterySox, DetectBatteryAnomalies, EmptyArgs as BatteryEmptyArgs,
-    FileIdArgs as BatteryFileIdArgs, GetBatteryOptions, GetBatteryOutParams, GetBatteryParaInfo,
-    GetBatteryTaskStatus, GetSimulationResult, ListBatteryModels, ListBatteryParaSets,
-    ListSimulationResults, ParameterSetNameArgs, PredictBatteryRul, PredictionArgs,
-    RunBatterySimulation, SimulateArgs, SimulateTiannengBattery, SimulationResultArgs,
-    TaskIdArgs as BatteryTaskIdArgs, TiannengSimulateArgs, TrainBatteryLstm, TrainingArgs,
-    VariablesArgs,
+    AnalyzeBatterySox, DeleteElectrolyteTask, DetectBatteryAnomalies, ElectrolyteFormulaArgs,
+    ElectrolytePredictArgs, EmptyArgs as BatteryEmptyArgs, FileIdArgs as BatteryFileIdArgs,
+    GenerateElectrolyteFormula, GetBatteryOptions, GetBatteryOutParams, GetBatteryParaInfo,
+    GetBatteryTaskStatus, GetSimulationResult, ListBatteryModels,
+    ListBatteryParaSets, ListSimulationResults, ParameterSetNameArgs, PredictBatteryRul,
+    PredictElectrolyteProperties, PredictionArgs, RunBatterySimulation, SimulateArgs,
+    SimulateTiannengBattery, SimulationResultArgs, TaskIdArgs as BatteryTaskIdArgs,
+    TiannengSimulateArgs, TrainBatteryLstm, TrainingArgs, VariablesArgs,
 };
 pub mod confirmation;
 pub use confirmation::{HITL_SIGNAL_WAIT_FOR_USER, RequestConfirmation};

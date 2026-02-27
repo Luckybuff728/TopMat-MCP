@@ -199,6 +199,18 @@ macro_rules! register_all_mcp_tools {
                 args_type: FileRetrieveParams,
                 constructor: RetrieveFile
             },
+            GenerateElectrolyteFormula {
+                args_type: ElectrolyteFormulaArgs,
+                constructor: GenerateElectrolyteFormula
+            },
+            PredictElectrolyteProperties {
+                args_type: ElectrolytePredictArgs,
+                constructor: PredictElectrolyteProperties
+            },
+            DeleteElectrolyteTask {
+                args_type: BatteryTaskIdArgs,
+                constructor: DeleteElectrolyteTask
+            },
             // // Battery Simulation 工具
             // ListBatteryModels {
             //     args_type: BatteryEmptyArgs,
