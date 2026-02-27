@@ -667,7 +667,7 @@ impl Tool for GenerateElectrolyteFormula {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let url = format!("{}/analysis/bamboo-mixer/generate/task", BATTERY_API_BASE_URL);
+        let url = format!("{}/analysis/bamboo-mixer/generate-task", BATTERY_API_BASE_URL);
         let client = reqwest::Client::new();
 
         let response = client
