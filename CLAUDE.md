@@ -80,7 +80,7 @@ TopMat-LLM/
 │       ├── models.rs              # Core data structures and API models
 │       ├── handlers/              # HTTP request handlers for different endpoints
 │       ├── middleware/            # Authentication, logging, and MCP-specific middleware
-│       ├── database/              # SQLite database connection and models
+│       ├── database/              # PostgreSQL database connection and models
 │       ├── agent/                 # AI model provider implementations
 │       │   └── examples/          # 96+ comprehensive agent examples
 │       └── mcp/                   # Model Context Protocol server
@@ -94,7 +94,7 @@ TopMat-LLM/
 
 ### Configuration Files
 - **`.env`**: Environment variables for API keys and server settings (create locally)
-- **`Cargo.toml`**: Rust dependencies including RMCP v0.8, Axum v0.8, SQLx v0.7
+- **`Cargo.toml`**: Rust dependencies including RMCP v0.8, Axum v0.8, SQLx v0.8
 - **`docker-compose.yml`**: Production deployment with port mapping 10007:3000
 
 ## Development Workflow
@@ -119,8 +119,8 @@ cargo watch -x "fmt && clippy && test"
 
 ### Core Technology Stack
 - **Web Framework**: Axum v0.8 with Tokio async runtime
-- **Database**: SQLite with SQLx v0.7 for async database access
-- **LLM Framework**: rig-core v0.23.1 (vendored locally) with RMCP v0.8 support
+- **Database**: PostgreSQL with SQLx v0.8 for async database access
+- **LLM Framework**: rig-core (vendored locally in `rig/`) with RMCP v0.8 support
 - **MCP Transport**: StreamableHTTP, SSE, and client-server transports
 - **Authentication**: External API service integration with MCP-specific auth
 - **Serialization**: Serde for JSON handling
@@ -159,8 +159,8 @@ Database migrations are handled in `src/server/database/connection.rs`. Core tab
 
 #### Key Configuration
 - **Rust Edition**: 2024 with modern async/await patterns
-- **Default Model**: `qwen3:4b` (configurable via environment)
-- **Database**: SQLite with async SQLx v0.7
+- **Default Model**: `qwen-plus` (configurable via environment)
+- **Database**: PostgreSQL with async SQLx v0.8
 - **Documentation**: Auto-generated OpenAPI with Swagger UI at `/swagger-ui`
 
 ### MCP Tool System
@@ -179,6 +179,8 @@ The project features a sophisticated MCP (Model Context Protocol) tool system wi
 - **`onnx_service.rs`**: ONNX model inference (model loading, inference, health checks)
 - **`dify.rs`**: Dify platform integration (steel RAG, cemented carbide RAG, Al IDME workflows)
 - **`phase_field.rs`**: Phase field simulations (spinodal decomposition, PVD simulation)
+- **`battery.rs`**: Battery simulation tools (PyBaMM integration, SOX analysis, LSTM training, RUL prediction, Tianneng battery simulation)
+- **`confirmation.rs`**: Human-in-the-Loop (HITL) confirmation tool for high-cost operations
 
 #### MCP Authentication Pattern
 - **GET requests**: No authentication required (tool discovery)
@@ -236,8 +238,8 @@ SERVER_HOST=127.0.0.1
 SERVER_PORT=3000
 RUST_LOG=info
 
-# Database (optional)
-DATABASE_URL=sqlite:data.db
+# Database (required)
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
 
 # Authentication (optional)
 AUTH_API_URL=https://api.topmaterial-tech.com
@@ -255,19 +257,19 @@ MCP_API_KEY=your_mcp_api_key               # MCP server authentication
 # Docker Environment (for containerized deployment)
 TZ=Asia/Shanghai
 SERVER_HOST=0.0.0.0                        # For Docker containers
-DATABASE_URL=sqlite:/app/data/data.db      # Docker data path
+DATABASE_URL=postgres://user:password@db:5432/dbname  # Docker database path
 ```
 
 ### Minimum Working Configuration
 Only these are required to get started:
 ```bash
 DASHSCOPE_API_KEY=your_qwen_api_key
-DATABASE_URL=sqlite:data.db
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
 ```
 
 ### Default Configuration
-- **Default model**: `qwen3:4b`
-- **Default database**: `sqlite:data.db` (creates automatically)
+- **Default model**: `qwen-plus`
+- **Default database**: PostgreSQL (requires DATABASE_URL)
 - **Default server**: `http://127.0.0.1:3000`
 - **Docker port mapping**: `10007:3000`
 - **API Documentation**: Available at `/swagger-ui` after server starts
@@ -362,7 +364,7 @@ impl Tool for MyCustomTool {
 ### Database Migrations
 Database schema changes should be handled in `src/server/database/connection.rs`:
 ```rust
-async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     // Add migration SQL here
 }
 ```
@@ -393,7 +395,7 @@ data: {"type":"final","response":{...}}
 The project uses a vendored rig-core workspace in the `rig/` directory:
 - **Location**: `rig/rig-core/`
 - **Features**: RMCP (Model Context Protocol) support enabled
-- **Version**: v0.23.1 (local development version)
+- **Version**: Local development version (path dependency)
 - **Updates**: Workspace is committed alongside main project
 
 ## Testing
@@ -479,7 +481,9 @@ The server includes a sophisticated MCP (Model Context Protocol) implementation 
 - **Domain-Specific Tools**: Specialized for materials science workflows
 - **Simulation Integration**: Direct access to computational tools
 - **Data Processing**: ONNX model inference for ML predictions
-- **External Services**: Integration with CalphaMesh and Dify platforms
+- **External Services**: Integration with CalphaMesh, Dify, and battery simulation platforms
+- **Battery Simulation**: PyBaMM-based battery modeling with SOX analysis, RUL prediction, and Tianneng battery support
+- **Human-in-the-Loop**: `RequestConfirmation` tool enables user approval before high-cost operations
 
 ## Security Considerations
 
@@ -504,4 +508,5 @@ The server includes a sophisticated MCP (Model Context Protocol) implementation 
 - Configure proper CORS policies for your domain
 - Enable HTTPS/TLS in production environments
 - Monitor and restrict tool execution resources
-- Implement proper backup strategies for SQLite database
+- Implement proper backup strategies for PostgreSQL database
+- Ensure PostgreSQL connection pooling is configured for high concurrency
