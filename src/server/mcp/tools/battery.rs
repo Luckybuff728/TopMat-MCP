@@ -98,6 +98,10 @@ pub struct SimulateArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameter_overrides: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameter_updates: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub var_pts: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub calc_esoh: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub save_at_cycles: Option<serde_json::Value>,
