@@ -199,6 +199,7 @@ macro_rules! register_all_mcp_tools {
                 args_type: FileRetrieveParams,
                 constructor: RetrieveFile
             },
+            // Battery Simulation 工具
             GenerateElectrolyteFormula {
                 args_type: ElectrolyteFormulaArgs,
                 constructor: GenerateElectrolyteFormula
@@ -211,65 +212,65 @@ macro_rules! register_all_mcp_tools {
                 args_type: BatteryTaskIdArgs,
                 constructor: DeleteElectrolyteTask
             },
-            // // Battery Simulation 工具
-            // ListBatteryModels {
-            //     args_type: BatteryEmptyArgs,
-            //     constructor: ListBatteryModels
-            // },
-            // ListBatteryParaSets {
-            //     args_type: BatteryEmptyArgs,
-            //     constructor: ListBatteryParaSets
-            // },
-            // GetBatteryOptions {
-            //     args_type: BatteryEmptyArgs,
-            //     constructor: GetBatteryOptions
-            // },
-            // GetBatteryOutParams {
-            //     args_type: VariablesArgs,
-            //     constructor: GetBatteryOutParams
-            // },
-            // GetBatteryParaInfo {
-            //     args_type: ParameterSetNameArgs,
-            //     constructor: GetBatteryParaInfo
-            // },
-            // RunBatterySimulation {
-            //     args_type: SimulateArgs,
-            //     constructor: RunBatterySimulation
-            // },
-            // ListSimulationResults {
-            //     args_type: BatteryEmptyArgs,
-            //     constructor: ListSimulationResults
-            // },
-            // GetSimulationResult {
-            //     args_type: SimulationResultArgs,
-            //     constructor: GetSimulationResult
-            // },
-            // // Battery Analysis 工具
-            // AnalyzeBatterySox {
-            //     args_type: BatteryFileIdArgs,
-            //     constructor: AnalyzeBatterySox
-            // },
-            // TrainBatteryLstm {
-            //     args_type: TrainingArgs,
-            //     constructor: TrainBatteryLstm
-            // },
-            // GetBatteryTaskStatus {
-            //     args_type: BatteryTaskIdArgs,
-            //     constructor: GetBatteryTaskStatus
-            // },
-            // PredictBatteryRul {
-            //     args_type: PredictionArgs,
-            //     constructor: PredictBatteryRul
-            // },
-            // DetectBatteryAnomalies {
-            //     args_type: BatteryFileIdArgs,
-            //     constructor: DetectBatteryAnomalies
-            // },
-            // // Tianneng 工具
-            // SimulateTiannengBattery {
-            //     args_type: TiannengSimulateArgs,
-            //     constructor: SimulateTiannengBattery
-            // },
+            
+            ListBatteryModels {
+                args_type: BatteryEmptyArgs,
+                constructor: ListBatteryModels
+            },
+            ListBatteryParaSets {
+                args_type: BatteryEmptyArgs,
+                constructor: ListBatteryParaSets
+            },
+            GetBatteryOptions {
+                args_type: BatteryEmptyArgs,
+                constructor: GetBatteryOptions
+            },
+            GetBatteryOutParams {
+                args_type: VariablesArgs,
+                constructor: GetBatteryOutParams
+            },
+            GetBatteryParaInfo {
+                args_type: ParameterSetNameArgs,
+                constructor: GetBatteryParaInfo
+            },
+            RunBatterySimulation {
+                args_type: SimulateArgs,
+                constructor: RunBatterySimulation
+            },
+            ListSimulationResults {
+                args_type: BatteryEmptyArgs,
+                constructor: ListSimulationResults
+            },
+            GetSimulationResult {
+                args_type: SimulationResultArgs,
+                constructor: GetSimulationResult
+            },
+            // Battery Analysis 工具
+            AnalyzeBatterySox {
+                args_type: BatteryFileIdArgs,
+                constructor: AnalyzeBatterySox
+            },
+            TrainBatteryLstm {
+                args_type: TrainingArgs,
+                constructor: TrainBatteryLstm
+            },
+            GetBatteryTaskStatus {
+                args_type: BatteryTaskIdArgs,
+                constructor: GetBatteryTaskStatus
+            },
+            PredictBatteryRul {
+                args_type: PredictionArgs,
+                constructor: PredictBatteryRul
+            },
+            DetectBatteryAnomalies {
+                args_type: BatteryFileIdArgs,
+                constructor: DetectBatteryAnomalies
+            },
+            // Tianneng 工具
+            SimulateTiannengBattery {
+                args_type: TiannengSimulateArgs,
+                constructor: SimulateTiannengBattery
+            },
         );
     };
 }
