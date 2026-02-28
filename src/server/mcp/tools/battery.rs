@@ -446,7 +446,9 @@ impl Tool for RunBatterySimulation {
                     "options": { "type": "object", "description": "模型选项，例如 {'thermal': 'isothermal'}，默认为空" },
                     "parameter_overrides": { "type": "object", "description": "参数覆盖，参数名称限制非常严格，如有必要请使用GetBatteryParaInfo使用关键词进行查询" },
                     "calc_esoh": { "type": "boolean", "description": "是否计算电极状态，默认为空" },
-                    "save_at_cycles": { "description": "仅在指定循环保存解 (整数或整数列表)，默认为空" }
+                    "save_at_cycles": { "description": "仅在指定循环保存解 (整数或整数列表)，默认为空" },
+                    "parameter_updates": { "type": "object", "description": "参数更新，当没有这个参数则加入这个参数，有这个参数则更新这个参数" },
+                    "var_pts": {"type": "object", "description": "用于划分正负极和隔膜网格"}
                 }
             }),
         }
