@@ -2,8 +2,9 @@
 pub mod calphaMesh;
 pub mod think;
 pub use calphaMesh::{
-    GetTaskStatus, LineTaskParams, ListTasks, ListTasksParams, PointTaskParams, ScheilTaskParams,
-    SubmitLineTask, SubmitPointTask, SubmitScheilTask, TaskIdParams,
+    GetTaskResult, GetTaskResultParams, GetTaskStatus, LineTaskParams, ListTasks, ListTasksParams,
+    PointTaskParams, ScheilTaskParams, SubmitLineTask, SubmitPointTask, SubmitScheilTask,
+    TaskIdParams,
 };
 pub mod simulation;
 pub use simulation::ExperimentalDataReader;

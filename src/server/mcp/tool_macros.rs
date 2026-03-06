@@ -124,6 +124,10 @@ macro_rules! register_all_mcp_tools {
                 args_type: TaskIdParams,
                 constructor: GetTaskStatus::default()
             },
+            GetTaskResult {
+                args_type: GetTaskResultParams,
+                constructor: GetTaskResult::default()
+            },
             ListTasks {
                 args_type: ListTasksParams,
                 constructor: ListTasks::default()
