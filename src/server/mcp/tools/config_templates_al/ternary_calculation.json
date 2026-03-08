@@ -1,0 +1,39 @@
+{
+  "task_type": "ternary_calculation",
+  "tdb_file": "database/Al-Si-Mg-Fe-Mn_by_wf.TDB",
+  "task_name": "al_ternary_calculation_1",
+  "task_path": "examples/framework_demo/result/al_ternary_calculation_1",
+  "condition": {
+    "components": [
+      "AL",
+      "MG",
+      "SI"
+    ],
+    "activated_phases": [
+      "LIQUID",
+      "FCC_A1",
+      "DIAMOND_A4",
+      "HCP_A3",
+      "BETA_ALMG",
+      "EPSILON_ALMG",
+      "GAMMA_ALMG",
+      "MG2SI"
+    ],
+    "temperature": 773,
+    "compositions_y": {
+      "AL": 1.0,
+      "MG": 0.0,
+      "SI": 0.0
+    },
+    "compositions_x": {
+      "AL": 0.0,
+      "MG": 1.0,
+      "SI": 0.0
+    },
+    "compositions_o": {
+      "AL": 0.0,
+      "MG": 0.0,
+      "SI": 1.0
+    }
+  }
+}

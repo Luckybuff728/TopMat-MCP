@@ -107,7 +107,7 @@ macro_rules! register_all_mcp_tools {
             //     constructor: ExperimentalDataReader
             // },
 
-            // Calpha Mesh 工具
+            // Calpha Mesh 工具（7 类热力学计算任务 + 3 个辅助工具）
             SubmitPointTask {
                 args_type: PointTaskParams,
                 constructor: SubmitPointTask::default()
@@ -119,6 +119,22 @@ macro_rules! register_all_mcp_tools {
             SubmitScheilTask {
                 args_type: ScheilTaskParams,
                 constructor: SubmitScheilTask::default()
+            },
+            SubmitBinaryTask {
+                args_type: BinaryTaskParams,
+                constructor: SubmitBinaryTask::default()
+            },
+            SubmitTernaryTask {
+                args_type: TernaryTaskParams,
+                constructor: SubmitTernaryTask::default()
+            },
+            SubmitBoilingPointTask {
+                args_type: BoilingPointParams,
+                constructor: SubmitBoilingPointTask::default()
+            },
+            SubmitThermoPropertiesTask {
+                args_type: ThermoPropertiesParams,
+                constructor: SubmitThermoPropertiesTask::default()
             },
             GetTaskStatus {
                 args_type: TaskIdParams,

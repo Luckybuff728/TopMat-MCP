@@ -1,0 +1,32 @@
+{
+  "task_type": "binary_equilibrium",
+  "tdb_file": "database/Al-Si-Mg-Fe-Mn_by_wf.TDB",
+  "task_name": "al_binary_equilibrium_1",
+  "task_path": "examples/framework_demo/result/al_binary_equilibrium_1",
+  "activated_elements": [
+    "AL",
+    "SI"
+  ],
+  "created": "2026-03-07 00:00:00",
+  "condition": {
+    "activated_phases": [
+      "LIQUID",
+      "FCC_A1",
+      "DIAMOND_A4"
+    ],
+    "components": [
+      "AL",
+      "SI"
+    ],
+    "compositions_start": {
+      "AL": 1.0,
+      "SI": 0.0
+    },
+    "compositions_end": {
+      "AL": 0.7,
+      "SI": 0.3
+    },
+    "temperature_start": 500.0,
+    "temperature_end": 1200.0
+  }
+}

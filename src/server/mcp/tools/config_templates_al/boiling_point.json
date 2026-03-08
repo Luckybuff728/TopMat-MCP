@@ -1,0 +1,19 @@
+{
+  "tdb_file": "database/Al-Si-Mg-Fe-Mn_by_wf.TDB",
+  "task_type": "boiling_point",
+  "task_name": "al_boiling_point_1",
+  "task_path": "examples/framework_demo/result/al_boiling_point_1",
+  "condition": {
+    "components": [
+      "AL"
+    ],
+    "pressure": 101325,
+    "compositions": {
+      "AL": 1.0
+    },
+    "temperature_range": [
+      800,
+      4000
+    ]
+  }
+}

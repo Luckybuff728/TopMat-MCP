@@ -1,0 +1,59 @@
+{
+  "task_type": "thermodynamic_properties",
+  "tdb_file": "database/Al-Si-Mg-Fe-Mn_by_wf.TDB",
+  "task_name": "al_thermodynamic_properties_1",
+  "task_path": "examples/framework_demo/result/al_thermodynamic_properties_1",
+  "condition": {
+    "components": [
+      "AL",
+      "SI",
+      "MG",
+      "FE",
+      "MN"
+    ],
+    "activated_phases": [
+      "LIQUID",
+      "FCC_A1",
+      "DIAMOND_A4",
+      "HCP_A3",
+      "BCC_A2",
+      "CBCC_A12",
+      "BETA_ALMG",
+      "EPSILON_ALMG",
+      "GAMMA_ALMG",
+      "MG2SI",
+      "AL5FE2",
+      "AL13FE4",
+      "ALPHA_ALFESI",
+      "BETA_ALFESI",
+      "ALPHA_ALFEMNSI",
+      "AL4_FEMN"
+    ],
+    "compositions_start": {
+      "AL": 0.93,
+      "SI": 0.04,
+      "MG": 0.01,
+      "FE": 0.015,
+      "MN": 0.005
+    },
+    "compositions_end": {
+      "AL": 0.93,
+      "SI": 0.04,
+      "MG": 0.01,
+      "FE": 0.015,
+      "MN": 0.005
+    },
+    "temperature_start": 500,
+    "temperature_end": 950,
+    "increments": 25,
+    "pressure_start": 5,
+    "pressure_end": 5,
+    "pressure_increments": 2,
+    "properties": [
+      "GM",
+      "HM",
+      "SM",
+      "CPM"
+    ]
+  }
+}

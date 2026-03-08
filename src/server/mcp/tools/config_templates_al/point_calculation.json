@@ -1,0 +1,41 @@
+{
+  "task_type": "point_calculation",
+  "tdb_file": "database/Al-Si-Mg-Fe-Mn_by_wf.TDB",
+  "task_name": "al_point_calculation_1",
+  "task_path": "examples/framework_demo/result/al_point_calculation_1",
+  "condition": {
+    "components": [
+      "AL",
+      "SI",
+      "MG",
+      "FE",
+      "MN"
+    ],
+    "activated_phases": [
+      "LIQUID",
+      "FCC_A1",
+      "DIAMOND_A4",
+      "HCP_A3",
+      "BCC_A2",
+      "CBCC_A12",
+      "BETA_ALMG",
+      "EPSILON_ALMG",
+      "GAMMA_ALMG",
+      "MG2SI",
+      "AL5FE2",
+      "AL13FE4",
+      "ALPHA_ALFESI",
+      "BETA_ALFESI",
+      "ALPHA_ALFEMNSI",
+      "AL4_FEMN"
+    ],
+    "temperature": 850,
+    "compositions": {
+      "AL": 0.93,
+      "SI": 0.04,
+      "MG": 0.01,
+      "FE": 0.015,
+      "MN": 0.005
+    }
+  }
+}

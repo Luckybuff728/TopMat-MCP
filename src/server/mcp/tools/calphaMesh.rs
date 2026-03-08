@@ -26,6 +26,11 @@ const TDB_ELEMENT_MAP: &[(&str, &[&str])] = &[
         "B-C-SI-ZR-HF-LA-Y-TI-O.TDB",
         &["B", "C", "SI", "ZR", "HF", "LA", "Y", "TI", "O"],
     ),
+    // AL 基合金 TDB：Al-Si-Mg-Fe-Mn 压铸铝合金体系（含 Fe/Mn 杂质），已在 topthermo-next 后端注册
+    (
+        "Al-Si-Mg-Fe-Mn_by_wf.TDB",
+        &["AL", "SI", "MG", "FE", "MN"],
+    ),
 ];
 
 fn tdb_enum_values() -> Vec<&'static str> {
@@ -37,6 +42,37 @@ fn tdb_elements(tdb_file: &str) -> Option<&'static [&'static str]> {
         .iter()
         .find(|(name, _)| *name == tdb_file)
         .map(|(_, elements)| *elements)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Al 数据库各任务类型的推荐激活相列表（以 http_api_payload参考.md 已验证运行为准）
+// ═══════════════════════════════════════════════════════════════════
+
+/// Al-Si-Mg-Fe-Mn 5 元体系推荐相集合（适用于 point/line/scheil/thermo 任务）
+const AL_5ELEMENT_PHASES: &[&str] = &[
+    "LIQUID", "FCC_A1", "DIAMOND_A4", "HCP_A3", "BCC_A2", "CBCC_A12",
+    "BETA_ALMG", "EPSILON_ALMG", "GAMMA_ALMG", "MG2SI",
+    "AL5FE2", "AL13FE4", "ALPHA_ALFESI", "BETA_ALFESI", "ALPHA_ALFEMNSI", "AL4_FEMN",
+];
+
+/// Al-Mg-Si 3 元体系推荐相集合（适用于 ternary 任务）
+const AL_TERNARY_PHASES: &[&str] = &[
+    "LIQUID", "FCC_A1", "DIAMOND_A4", "HCP_A3",
+    "BETA_ALMG", "EPSILON_ALMG", "GAMMA_ALMG", "MG2SI",
+];
+
+/// Al-Si 2 元体系推荐相集合（适用于 binary 任务）
+const AL_BINARY_PHASES: &[&str] = &[
+    "LIQUID", "FCC_A1", "DIAMOND_A4",
+];
+
+/// 多元 Al 任务默认相列表（5 元配方）
+fn tdb_default_phases(tdb_file: &str) -> Vec<&'static str> {
+    match tdb_file {
+        "Al-Si-Mg-Fe-Mn_by_wf.TDB" => AL_5ELEMENT_PHASES.to_vec(),
+        // Fe 基和 B 基 TDB 使用全部可用相（["*"] 在这些库中有效）
+        _ => vec!["*"],
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -86,10 +122,13 @@ impl From<serde_json::Error> for CalphaMeshError {
 // 统一前置校验层
 // ═══════════════════════════════════════════════════════════════════
 
-fn validate_composition_sum(composition: &HashMap<String, f64>) -> Result<(), CalphaMeshError> {
+/// 归一化成分 HashMap：若误差在合理范围内（< 2%）则自动除以总和，
+/// 使提交给 TopThermo 的数值严格等于 1.0。
+/// 误差超过 2% 视为参数严重错误，返回 Err。
+fn normalize_composition(composition: &HashMap<String, f64>) -> Result<HashMap<String, f64>, CalphaMeshError> {
     let sum: f64 = composition.values().sum();
-    const TOLERANCE: f64 = 1e-6;
-    if (sum - 1.0).abs() > TOLERANCE {
+    const HARD_LIMIT: f64 = 2e-2;
+    if (sum - 1.0).abs() > HARD_LIMIT {
         let detail: Vec<String> = composition
             .iter()
             .map(|(k, v)| format!("{}={:.6}", k, v))
@@ -100,7 +139,14 @@ fn validate_composition_sum(composition: &HashMap<String, f64>) -> Result<(), Ca
             detail.join(", ")
         )));
     }
-    Ok(())
+    Ok(composition
+        .iter()
+        .map(|(k, v)| (k.clone(), v / sum))
+        .collect())
+}
+
+fn validate_composition_sum(composition: &HashMap<String, f64>) -> Result<(), CalphaMeshError> {
+    normalize_composition(composition).map(|_| ())
 }
 
 fn validate_components_match_composition(
@@ -169,6 +215,12 @@ fn validate_line_params(params: &LineTaskParams) -> Result<(), CalphaMeshError> 
     validate_components_match_composition(&params.components, &params.end_composition)?;
     validate_temperature_range(params.start_temperature, 200.0, 6000.0, "start_temperature")?;
     validate_temperature_range(params.end_temperature, 200.0, 6000.0, "end_temperature")?;
+    if params.start_temperature >= params.end_temperature {
+        return Err(CalphaMeshError::ValidationError(format!(
+            "start_temperature ({} K) 必须小于 end_temperature ({} K)，Line 扫描方向为升温（低温→高温）",
+            params.start_temperature, params.end_temperature
+        )));
+    }
     if params.steps < 2 || params.steps > 500 {
         return Err(CalphaMeshError::ValidationError(format!(
             "steps = {} 超出有效范围 2~500",
@@ -517,6 +569,8 @@ impl CalphaMeshClient {
         &self,
         params: PointTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        let phases = tdb_default_phases(&params.tdb_file);
+        let composition = normalize_composition(&params.composition)?;
         let inner = json!({
             "task_type": "point_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -524,9 +578,9 @@ impl CalphaMeshClient {
             "task_path": Self::generate_task_path("point"),
             "condition": {
                 "components": params.components,
-                "activated_phases": [],
+                "activated_phases": phases,
                 "temperature": params.temperature,
-                "compositions": params.composition
+                "compositions": composition
             }
         });
 
@@ -541,6 +595,9 @@ impl CalphaMeshClient {
         &self,
         params: LineTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        let phases = tdb_default_phases(&params.tdb_file);
+        let start_composition = normalize_composition(&params.start_composition)?;
+        let end_composition = normalize_composition(&params.end_composition)?;
         let inner = json!({
             "task_type": "line_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -548,12 +605,12 @@ impl CalphaMeshClient {
             "task_path": Self::generate_task_path("line"),
             "condition": {
                 "components": params.components,
-                "compositions_start": params.start_composition,
-                "compositions_end": params.end_composition,
+                "compositions_start": start_composition,
+                "compositions_end": end_composition,
                 "temperature_start": params.start_temperature,
                 "temperature_end": params.end_temperature,
                 "increments": params.steps,
-                "activated_phases": []
+                "activated_phases": phases
             }
         });
 
@@ -568,6 +625,8 @@ impl CalphaMeshClient {
         &self,
         params: ScheilTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        let phases = tdb_default_phases(&params.tdb_file);
+        let composition = normalize_composition(&params.composition)?;
         let inner = json!({
             "task_type": "scheil_solidification",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -575,10 +634,10 @@ impl CalphaMeshClient {
             "task_path": Self::generate_task_path("scheil"),
             "condition": {
                 "components": params.components,
-                "compositions": params.composition,
+                "compositions": composition,
                 "start_temperature": params.start_temperature,
                 "temperature_step": params.temperature_step,
-                "activated_phases": [],
+                "activated_phases": phases,
                 "inhibit_phases": []
             }
         });
@@ -594,16 +653,25 @@ impl CalphaMeshClient {
         &self,
         params: BinaryTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        // 二元相图：Binary 任务需要顶层 activated_elements 字段（API payload 参考要求）
+        // Al-Si 二元选用 AL_BINARY_PHASES，其他 TDB 使用 ["*"]
+        let phases: Vec<&str> = match params.tdb_file.as_str() {
+            "Al-Si-Mg-Fe-Mn_by_wf.TDB" => AL_BINARY_PHASES.to_vec(),
+            _ => vec!["*"],
+        };
+        let start_composition = normalize_composition(&params.start_composition)?;
+        let end_composition = normalize_composition(&params.end_composition)?;
         let inner = json!({
             "task_type": "binary_equilibrium",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
             "task_name": format!("binary_{}", chrono::Utc::now().timestamp()),
             "task_path": Self::generate_task_path("binary"),
+            "activated_elements": params.components,
             "condition": {
                 "components": params.components,
-                "activated_phases": ["*"],
-                "compositions_start": params.start_composition,
-                "compositions_end": params.end_composition,
+                "activated_phases": phases,
+                "compositions_start": start_composition,
+                "compositions_end": end_composition,
                 "temperature_start": params.start_temperature,
                 "temperature_end": params.end_temperature
             }
@@ -620,6 +688,14 @@ impl CalphaMeshClient {
         &self,
         params: TernaryTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        // 三元等温截面：Al-Mg-Si 用 AL_TERNARY_PHASES（8相），其他 TDB 用 ["*"]
+        let phases: Vec<&str> = match params.tdb_file.as_str() {
+            "Al-Si-Mg-Fe-Mn_by_wf.TDB" => AL_TERNARY_PHASES.to_vec(),
+            _ => vec!["*"],
+        };
+        let composition_y = normalize_composition(&params.composition_y)?;
+        let composition_x = normalize_composition(&params.composition_x)?;
+        let composition_o = normalize_composition(&params.composition_o)?;
         let inner = json!({
             "task_type": "ternary_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -627,11 +703,11 @@ impl CalphaMeshClient {
             "task_path": Self::generate_task_path("ternary"),
             "condition": {
                 "components": params.components,
-                "activated_phases": ["*"],
+                "activated_phases": phases,
                 "temperature": params.temperature,
-                "compositions_y": params.composition_y,
-                "compositions_x": params.composition_x,
-                "compositions_o": params.composition_o
+                "compositions_y": composition_y,
+                "compositions_x": composition_x,
+                "compositions_o": composition_o
             }
         });
 
@@ -646,6 +722,7 @@ impl CalphaMeshClient {
         &self,
         params: BoilingPointParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        let composition = normalize_composition(&params.composition)?;
         let inner = json!({
             "task_type": "boiling_point",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -654,7 +731,7 @@ impl CalphaMeshClient {
             "condition": {
                 "components": params.components,
                 "pressure": params.pressure,
-                "compositions": params.composition,
+                "compositions": composition,
                 "temperature_range": [params.temperature_range.0, params.temperature_range.1]
             }
         });
@@ -670,6 +747,9 @@ impl CalphaMeshClient {
         &self,
         params: ThermoPropertiesParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        // 热力学性质任务使用与 point/line 相同的 5 元相集合
+        let phases = tdb_default_phases(&params.tdb_file);
+        let composition = normalize_composition(&params.composition)?;
         let inner = json!({
             "task_type": "thermodynamic_properties",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -677,9 +757,9 @@ impl CalphaMeshClient {
             "task_path": Self::generate_task_path("properties"),
             "condition": {
                 "components": params.components,
-                "activated_phases": ["*"],
-                "compositions_start": params.composition,
-                "compositions_end": params.composition,
+                "activated_phases": phases,
+                "compositions_start": composition,
+                "compositions_end": composition,
                 "temperature_start": params.temperature_start,
                 "temperature_end": params.temperature_end,
                 "increments": params.increments,
@@ -852,8 +932,8 @@ impl Tool for SubmitPointTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "热力学数据库文件名。必须包含 components 中所有元素。FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB，硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。必须包含 components 中所有元素。Al-Si-Mg 压铸铝合金（AL/SI/MG/FE/MN）选 Al-Si-Mg-Fe-Mn_by_wf.TDB；FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB；硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
                     }
                 },
                 "required": ["components", "composition", "temperature", "tdb_file"],
@@ -948,8 +1028,8 @@ impl Tool for SubmitLineTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "热力学数据库文件名。必须包含 components 中所有元素。"
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。必须包含 components 中所有元素。Al-Si-Mg 压铸铝合金（AL/SI/MG/FE/MN）选 Al-Si-Mg-Fe-Mn_by_wf.TDB；FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB；硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
                     }
                 },
                 "required": ["components", "start_composition", "end_composition", "start_temperature", "end_temperature", "steps", "tdb_file"],
@@ -1035,8 +1115,8 @@ impl Tool for SubmitScheilTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "热力学数据库文件名。必须包含 components 中所有元素。"
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。必须包含 components 中所有元素。Al-Si-Mg 压铸铝合金（AL/SI/MG/FE/MN）选 Al-Si-Mg-Fe-Mn_by_wf.TDB；FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB；硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
                     }
                 },
                 "required": ["components", "composition", "start_temperature", "tdb_file"],
@@ -1239,38 +1319,56 @@ impl Tool for GetTaskResult {
         let file_resp = client.get_result_files(task.id).await?;
         let files_map = build_files_map(&file_resp.files);
 
-        let has_results_json = file_resp
-            .files
-            .iter()
-            .any(|u| extract_filename(u) == "results.json");
-        // 实际后端输出为 scheil_conditions.json，保留旧名兼容
-        let has_scheil_json = file_resp
-            .files
-            .iter()
-            .any(|u| {
-                let name = extract_filename(u);
-                name == "scheil_solidification.json" || name == "scheil_conditions.json"
-            });
-        let has_csv = file_resp
-            .files
-            .iter()
-            .any(|u| extract_filename(u).ends_with(".csv"));
+        let file_names: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
 
-        // 仅有 output.log 时说明后端计算失败但 status 仍为 completed
-        let only_log = file_resp.files.len() <= 1
-            && file_resp.files.iter().all(|u| extract_filename(u) == "output.log");
-        if only_log {
-            let log_hint = if !file_resp.files.is_empty() {
-                format!(" 日志文件: {}", file_resp.files[0])
+        // ── 结果文件检测 ──────────────────────────────────────────────
+        // point_calculation → results.json
+        let has_results_json = file_names.iter().any(|n| n == "results.json");
+        // scheil（旧版 JSON 格式，legacy）
+        let has_scheil_json = file_names.iter().any(|n| n == "scheil_solidification.json");
+        // scheil（新版 CSV 格式，当前后端输出）
+        let has_scheil_csv = file_names.iter().any(|n| n == "scheil_solidification.csv");
+        // binary_equilibrium → binary_equilibrium.json
+        let has_binary_json = file_names.iter().any(|n| n == "binary_equilibrium.json");
+        // ternary_calculation → ternary_plotly.json
+        let has_ternary_json = file_names.iter().any(|n| n == "ternary_plotly.json");
+        // thermodynamic_properties → thermodynamic_properties.json OR thermodynamic_properties.csv
+        let has_thermo_json = file_names.iter().any(|n| n == "thermodynamic_properties.json");
+        let has_thermo_csv = file_names.iter().any(|n| n == "thermodynamic_properties.csv");
+        // boiling_point → boiling_melting_point.csv
+        let has_boiling_csv = file_names.iter().any(|n| n == "boiling_melting_point.csv");
+        // line_calculation → 任意非 Scheil/Boiling 的 CSV
+        let has_line_csv = file_names.iter().any(|n| {
+            n.ends_with(".csv")
+                && n != "scheil_solidification.csv"
+                && n != "boiling_melting_point.csv"
+        });
+        // scheil_conditions.json = 仅是输入条件回显，不代表计算成功，不计入
+
+        // 无实际结果文件：仅有 output.log 或仅有条件回显文件
+        let has_actual_result = has_results_json || has_scheil_json || has_scheil_csv
+            || has_binary_json || has_ternary_json
+            || has_thermo_json || has_thermo_csv
+            || has_boiling_csv || has_line_csv;
+        if !has_actual_result {
+            let log_url = file_resp
+                .files
+                .iter()
+                .find(|u| extract_filename(u) == "output.log")
+                .cloned()
+                .unwrap_or_default();
+            let log_hint = if !log_url.is_empty() {
+                format!(" 日志文件: {}", log_url)
             } else {
                 String::new()
             };
+            let all_files: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
             let output = serde_json::json!({
                 "error_code": "no_result_files",
                 "task_id": args.task_id,
                 "message": format!(
-                    "任务已完成但未生成结果文件，可能是计算过程中出现错误。{}",
-                    log_hint
+                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中可能出现错误。{}",
+                    all_files, log_hint
                 ),
                 "retryable": true,
                 "details": "请检查 components/composition/tdb_file 是否正确，或调整参数后重新提交"
@@ -1283,10 +1381,31 @@ impl Tool for GetTaskResult {
         if has_results_json {
             self.handle_point_result(&client, &file_resp.files, &files_map)
                 .await
+        } else if has_scheil_csv {
+            // Scheil CSV 优先（当前后端成功计算时输出的主要格式，字段更可靠）
+            self.handle_scheil_csv_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
+                .await
         } else if has_scheil_json {
+            // Scheil JSON（旧版 legacy 格式，仅当没有 CSV 时才使用）
             self.handle_scheil_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
                 .await
-        } else if has_csv {
+        } else if has_binary_json {
+            self.handle_binary_result(&client, &file_resp.files, &files_map, args.task_id)
+                .await
+        } else if has_ternary_json {
+            self.handle_ternary_result(&client, &file_resp.files, &files_map, args.task_id)
+                .await
+        } else if has_thermo_csv {
+            // 热力学性质 CSV（当前后端主要输出格式）
+            self.handle_thermo_csv_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
+                .await
+        } else if has_thermo_json {
+            self.handle_thermo_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
+                .await
+        } else if has_boiling_csv {
+            self.handle_boiling_result(&client, &file_resp.files, &files_map, args.task_id)
+                .await
+        } else if has_line_csv {
             self.handle_line_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
                 .await
         } else {
@@ -1478,6 +1597,148 @@ impl GetTaskResult {
         Ok(serde_json::to_string(&output).unwrap_or_default())
     }
 
+    /// 解析后端新格式 Scheil 结果：scheil_solidification.csv
+    /// CSV 格式：第一列为温度（K），包含 f(LIQUID) 列，其余列为各固相分数
+    async fn handle_scheil_csv_result(
+        &self,
+        client: &CalphaMeshClient,
+        file_urls: &[String],
+        files_map: &serde_json::Value,
+        result_mode: &str,
+        task_id: i32,
+    ) -> Result<String, CalphaMeshError> {
+        let csv_url = file_urls
+            .iter()
+            .find(|u| extract_filename(u) == "scheil_solidification.csv")
+            .ok_or_else(|| {
+                CalphaMeshError::HttpError("scheil_solidification.csv not found".to_string())
+            })?;
+
+        let content = client.download_file_content(csv_url).await?;
+        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+
+        if lines.len() < 2 {
+            let output = json!({
+                "task_id": task_id,
+                "task_type": "scheil_solidification",
+                "status": "completed",
+                "result": {"data_summary": {"total_steps": 0}, "derived_metrics": {}},
+                "files": files_map
+            });
+            return Ok(serde_json::to_string(&output).unwrap_or_default());
+        }
+
+        let headers: Vec<&str> = lines[0].split(',').map(|s| s.trim()).collect();
+
+        // 找温度列和液相分数列的索引
+        let temp_idx = headers.iter().position(|h| {
+            let h_up = h.to_uppercase();
+            h_up.contains("T/K") || h_up == "T" || h_up == "TEMP" || h_up == "TEMPERATURE"
+        }).unwrap_or(0);
+
+        let liquid_idx = headers.iter().position(|h| {
+            let h_up = h.to_uppercase();
+            h_up.contains("F(LIQUID)") || h_up.contains("LIQUID") || *h == "f(LIQUID)"
+        });
+
+        let mut temps: Vec<f64> = Vec::new();
+        let mut liquid_fracs: Vec<f64> = Vec::new();
+        let mut all_rows: Vec<serde_json::Value> = Vec::new();
+
+        for line in &lines[1..] {
+            let cols: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            if let Some(t) = cols.get(temp_idx).and_then(|s| s.parse::<f64>().ok()) {
+                temps.push(t);
+                if let Some(liq_idx) = liquid_idx {
+                    let lf = cols.get(liq_idx).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                    liquid_fracs.push(lf);
+                }
+                // 构建行对象
+                let mut row = serde_json::Map::new();
+                for (i, h) in headers.iter().enumerate() {
+                    if let Some(val) = cols.get(i).and_then(|s| s.parse::<f64>().ok()) {
+                        row.insert(h.to_string(), json!(val));
+                    }
+                }
+                all_rows.push(json!(row));
+            }
+        }
+
+        let total_steps = temps.len();
+        // 液相线 = 最高温（f(LIQUID)=1），固相线 = 最低温（f(LIQUID)=0）
+        let liquidus = temps.first().copied().unwrap_or(0.0);
+        let solidus = temps.last().copied().unwrap_or(0.0);
+
+        let find_temp_at_fraction = |target: f64| -> f64 {
+            if liquid_fracs.is_empty() { return 0.0; }
+            for i in 0..liquid_fracs.len() {
+                if liquid_fracs[i] <= target {
+                    return *temps.get(i).unwrap_or(&solidus);
+                }
+            }
+            solidus
+        };
+
+        let liquid_monotonic = liquid_fracs.windows(2).all(|w| w[0] >= w[1]);
+
+        // 均匀采样：从全程57步中取最多20个均匀分布的数据点，覆盖完整凝固区间
+        // （不能只取前20行，否则只覆盖高温液态区，看不到实际凝固曲线）
+        let sample_size: usize = 20.min(total_steps);
+        let shown_rows: Vec<_> = if total_steps <= sample_size {
+            all_rows.clone()
+        } else {
+            (0..sample_size)
+                .map(|i| {
+                    // 线性插值索引，确保第一行（liquidus）和最后一行（solidus）都包含
+                    i * (total_steps - 1) / (sample_size - 1)
+                })
+                .filter_map(|idx| all_rows.get(idx))
+                .cloned()
+                .collect()
+        };
+
+        let derived_metrics = json!({
+            "freezing_range_K": liquidus - solidus,
+            "t_at_liquid_fraction_0_9_K": find_temp_at_fraction(0.9),
+            "t_at_liquid_fraction_0_5_K": find_temp_at_fraction(0.5),
+            "t_at_liquid_fraction_0_1_K": find_temp_at_fraction(0.1),
+            "curve_monotonic_check": {"liquid_fraction_non_increasing": liquid_monotonic}
+        });
+
+        let key_points = json!([
+            {"temperature_K": liquidus, "liquid_fraction": liquid_fracs.first().copied().unwrap_or(1.0), "solid_fraction": 1.0 - liquid_fracs.first().copied().unwrap_or(1.0)},
+            {"temperature_K": find_temp_at_fraction(0.5), "liquid_fraction": 0.5, "solid_fraction": 0.5},
+            {"temperature_K": solidus, "liquid_fraction": liquid_fracs.last().copied().unwrap_or(0.0), "solid_fraction": 1.0 - liquid_fracs.last().copied().unwrap_or(0.0)}
+        ]);
+
+        let mut output = json!({
+            "task_id": task_id,
+            "task_type": "scheil_solidification",
+            "status": "completed",
+            "result": {
+                "data_summary": {
+                    "converged": true,
+                    "method": "scheil",
+                    "total_steps": total_steps,
+                    "temperature_range": {"liquidus_K": liquidus, "solidus_K": solidus},
+                    "key_points": key_points,
+                    "columns": headers,
+                    "shown_rows": shown_rows
+                },
+                "derived_metrics": derived_metrics
+            },
+            "files": files_map
+        });
+
+        if result_mode == "full" {
+            if let Some(result_obj) = output.get_mut("result").and_then(|r| r.as_object_mut()) {
+                result_obj.insert("raw_data".to_string(), json!(all_rows));
+            }
+        }
+
+        Ok(serde_json::to_string(&output).unwrap_or_default())
+    }
+
     async fn handle_line_result(
         &self,
         client: &CalphaMeshClient,
@@ -1490,7 +1751,7 @@ impl GetTaskResult {
             .iter()
             .find(|u| {
                 let name = extract_filename(u);
-                name.ends_with(".csv")
+                name.ends_with(".csv") && name != "scheil_solidification.csv"
             })
             .ok_or_else(|| {
                 let names: Vec<String> = file_urls.iter().map(|u| extract_filename(u)).collect();
@@ -1641,6 +1902,380 @@ impl GetTaskResult {
 
         Ok(serde_json::to_string(&output).unwrap_or_default())
     }
+
+    // ── binary_equilibrium 结果处理 ──────────────────────────────────
+    async fn handle_binary_result(
+        &self,
+        client: &CalphaMeshClient,
+        file_urls: &[String],
+        files_map: &serde_json::Value,
+        task_id: i32,
+    ) -> Result<String, CalphaMeshError> {
+        let url = file_urls.iter()
+            .find(|u| extract_filename(u) == "binary_equilibrium.json")
+            .ok_or_else(|| CalphaMeshError::HttpError("binary_equilibrium.json not found".to_string()))?;
+        let content = client.download_file_content(url).await?;
+        let raw: serde_json::Value = serde_json::from_str(&content)
+            .unwrap_or(serde_json::Value::String(content));
+
+        // 后端实际返回结构：{ summary: { boundary_count, phase_count }, ... }
+        // 用 summary 字段提取摘要，同时保留原始数据供高级用户
+        let summary = raw.get("summary").cloned().unwrap_or(json!({}));
+        let boundary_count = summary.get("boundary_count").and_then(|v| v.as_i64()).unwrap_or(0);
+        let phase_count = summary.get("phase_count").and_then(|v| v.as_i64()).unwrap_or(0);
+        let title = raw.get("title").and_then(|v| v.as_str()).unwrap_or("Al-Si").to_string();
+
+        let output = json!({
+            "task_id": task_id,
+            "task_type": "binary_equilibrium",
+            "status": "completed",
+            "result": {
+                "data_summary": {
+                    "system": title,
+                    "phase_count": phase_count,
+                    "boundary_count": boundary_count,
+                    "note": "二元相图已计算完成，完整图形数据见 files.binary_equilibrium.json"
+                }
+            },
+            "files": files_map
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
+    }
+
+    // ── thermodynamic_properties CSV 结果处理 ────────────────────────
+    async fn handle_thermo_csv_result(
+        &self,
+        client: &CalphaMeshClient,
+        file_urls: &[String],
+        files_map: &serde_json::Value,
+        result_mode: &str,
+        task_id: i32,
+    ) -> Result<String, CalphaMeshError> {
+        let url = file_urls.iter()
+            .find(|u| extract_filename(u) == "thermodynamic_properties.csv")
+            .ok_or_else(|| CalphaMeshError::HttpError("thermodynamic_properties.csv not found".to_string()))?;
+        let content = client.download_file_content(url).await?;
+        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+
+        if lines.len() < 2 {
+            let output = json!({
+                "task_id": task_id,
+                "task_type": "thermodynamic_properties",
+                "status": "completed",
+                "result": {"data_summary": {"total_rows": 0}},
+                "files": files_map
+            });
+            return Ok(serde_json::to_string(&output).unwrap_or_default());
+        }
+
+        let headers: Vec<&str> = lines[0].split(',').map(|s| s.trim()).collect();
+        let data_lines = &lines[1..];
+        let total_rows = data_lines.len();
+
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        let mut all_nums: Vec<Vec<f64>> = Vec::new();
+
+        for line in data_lines {
+            let cols: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            let mut row = serde_json::Map::new();
+            let mut nums: Vec<f64> = Vec::new();
+            for (i, h) in headers.iter().enumerate() {
+                if let Some(v) = cols.get(i) {
+                    if let Ok(num) = v.parse::<f64>() {
+                        row.insert(h.to_string(), json!(num));
+                        nums.push(num);
+                    } else {
+                        row.insert(h.to_string(), json!(v));
+                        nums.push(f64::NAN);
+                    }
+                }
+            }
+            rows.push(json!(row));
+            all_nums.push(nums);
+        }
+
+        let t_col = headers.iter().position(|h| h.trim().to_uppercase().contains("T/K") || h.trim().to_uppercase() == "T");
+        let t_start = t_col.and_then(|i| all_nums.first().and_then(|r| r.get(i)).copied()).unwrap_or(0.0);
+        let t_end = t_col.and_then(|i| all_nums.last().and_then(|r| r.get(i)).copied()).unwrap_or(0.0);
+
+        // 提取 GM/HM/SM/CPM 极值
+        // 注意：实际 CSV 可能为 "GM(FCC_A1)/J/mol" 等包含相名的列，需用模糊匹配
+        // 对每个性质前缀找到所有匹配列，合并后取全局 min/max
+        let thermo_prefixes = [
+            ("GM", "GM/J/mol"),
+            ("HM", "HM/J/mol"),
+            ("SM", "SM/J/mol/K"),
+            ("CPM", "CPM/J/mol/K"),
+        ];
+        let mut extrema = serde_json::Map::new();
+        for (prefix, canonical_key) in &thermo_prefixes {
+            // 匹配所有包含该前缀的热力学列（如 GM/J/mol、GM(FCC_A1)/J/mol 均匹配）
+            let matching_cols: Vec<usize> = headers.iter()
+                .enumerate()
+                .filter(|(_, h)| {
+                    let ht = h.trim().to_uppercase();
+                    // 以前缀开头，后跟 "/" 或 "(" —— 防止 CPM 匹配 CBCC、HM 匹配 HCP 等
+                    ht.starts_with(prefix) && (ht.as_bytes().get(prefix.len()).map_or(true, |&b| b == b'/' || b == b'('))
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            if matching_cols.is_empty() { continue; }
+
+            let mut global_min = f64::MAX;
+            let mut global_max = f64::MIN;
+            for &ci in &matching_cols {
+                for row in &all_nums {
+                    if let Some(&val) = row.get(ci) {
+                        if !val.is_nan() {
+                            if val < global_min { global_min = val; }
+                            if val > global_max { global_max = val; }
+                        }
+                    }
+                }
+            }
+            if global_min < f64::MAX {
+                extrema.insert(canonical_key.to_string(), json!({"min": global_min, "max": global_max}));
+            }
+        }
+
+        let shown_rows = if result_mode == "full" { total_rows } else { total_rows.min(20) };
+        let display: Vec<_> = rows.iter().take(shown_rows).collect();
+
+        let mut output = json!({
+            "task_id": task_id,
+            "task_type": "thermodynamic_properties",
+            "status": "completed",
+            "result": {
+                "data_summary": {
+                    "total_rows": total_rows,
+                    "shown_rows": shown_rows,
+                    "temperature_range": {"start_K": t_start, "end_K": t_end},
+                    "columns": headers,
+                    "rows": display
+                },
+                "derived_metrics": {"property_extrema": extrema}
+            },
+            "units": {"GM":"J/mol","HM":"J/mol","SM":"J/(mol·K)","CPM":"J/(mol·K)"},
+            "files": files_map
+        });
+        if result_mode == "full" {
+            if let Some(ro) = output.get_mut("result").and_then(|r| r.as_object_mut()) {
+                ro.insert("raw_data".to_string(), json!(rows));
+            }
+        }
+        Ok(serde_json::to_string(&output).unwrap_or_default())
+    }
+
+    // ── ternary_calculation 结果处理 ─────────────────────────────────
+    async fn handle_ternary_result(
+        &self,
+        client: &CalphaMeshClient,
+        file_urls: &[String],
+        files_map: &serde_json::Value,
+        task_id: i32,
+    ) -> Result<String, CalphaMeshError> {
+        let url = file_urls.iter()
+            .find(|u| extract_filename(u) == "ternary_plotly.json")
+            .ok_or_else(|| CalphaMeshError::HttpError("ternary_plotly.json not found".to_string()))?;
+        let content = client.download_file_content(url).await?;
+        let raw: serde_json::Value = serde_json::from_str(&content)
+            .unwrap_or(serde_json::Value::String(content));
+
+        // 从 Plotly JSON 统计关键数量
+        // Plotly ternary JSON 结构可能是 {tie_triangles:[...], tie_lines:[...], data:[...], summary:{...}}
+        // 兼容多种字段名
+        // 统计三元相图计算网格点数
+        // 优先查找顶层命名字段，兜底从 Plotly traces 中统计 marker 点数
+        let point_count = ["points", "composition_points", "node_points", "grid_points", "phase_points"]
+            .iter()
+            .find_map(|&f| raw.get(f).and_then(|v| v.as_array()).map(|a| a.len()))
+            .or_else(|| {
+                // 从 Plotly data 数组汇总所有 marker/scatter trace 的坐标数量
+                // marker-type trace → 计算格点；line-only trace → 相界/共轭线
+                raw.get("data")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter(|trace| {
+                                let mode = trace.get("mode")
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or("");
+                                let has_marker = trace.get("marker").is_some();
+                                // 包含 markers 或有 marker 配置，且不是纯 line
+                                (mode.contains("markers") || has_marker)
+                                    && !mode.eq("lines")
+                            })
+                            .map(|trace| {
+                                // 支持标准 {x,y} 和 Plotly ternary {a,b,c}
+                                trace.get("x").or_else(|| trace.get("a"))
+                                    .and_then(|v| v.as_array())
+                                    .map(|a| a.len())
+                                    .unwrap_or(0)
+                            })
+                            .sum::<usize>()
+                    })
+                    .filter(|&n| n > 0)
+            })
+            .unwrap_or(0);
+
+        let tie_lines = ["tie_lines", "tielines", "two_phase_lines"]
+            .iter()
+            .find_map(|&f| raw.get(f).and_then(|v| v.as_array()).map(|a| a.len()))
+            .unwrap_or(0);
+
+        let tie_triangles = ["tie_triangles", "three_phase_triangles", "tiangles"]
+            .iter()
+            .find_map(|&f| raw.get(f).and_then(|v| v.as_array()).map(|a| a.len()))
+            .unwrap_or(0);
+
+        let phases = ["phases", "phase_list", "phase_names"]
+            .iter()
+            .find_map(|&f| {
+                raw.get(f).and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>())
+            })
+            .unwrap_or_default();
+
+        let output = json!({
+            "task_id": task_id,
+            "task_type": "ternary_calculation",
+            "status": "completed",
+            "result": {
+                "data_summary": {
+                    "point_count": point_count,
+                    "tie_line_count": tie_lines,
+                    "tie_triangle_count": tie_triangles,
+                    "phases_in_diagram": phases
+                }
+            },
+            "files": files_map
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
+    }
+
+    // ── thermodynamic_properties 结果处理 ────────────────────────────
+    async fn handle_thermo_result(
+        &self,
+        client: &CalphaMeshClient,
+        file_urls: &[String],
+        files_map: &serde_json::Value,
+        result_mode: &str,
+        task_id: i32,
+    ) -> Result<String, CalphaMeshError> {
+        let url = file_urls.iter()
+            .find(|u| extract_filename(u) == "thermodynamic_properties.json")
+            .ok_or_else(|| CalphaMeshError::HttpError("thermodynamic_properties.json not found".to_string()))?;
+        let content = client.download_file_content(url).await?;
+        let raw: serde_json::Value = serde_json::from_str(&content)
+            .unwrap_or(serde_json::Value::String(content));
+
+        // 从 JSON 中提取摘要：温度点数量、包含的性质
+        let data_points = raw.get("data").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        let properties = raw.get("properties").cloned().unwrap_or(json!(["GM","HM","SM","CPM"]));
+        let temperature_range = raw.get("temperature_range").cloned().unwrap_or(json!({}));
+
+        let mut output = json!({
+            "task_id": task_id,
+            "task_type": "thermodynamic_properties",
+            "status": "completed",
+            "result": {
+                "data_summary": {
+                    "data_point_count": data_points,
+                    "properties": properties,
+                    "temperature_range": temperature_range
+                }
+            },
+            "units": {
+                "GM": "J/mol",
+                "HM": "J/mol",
+                "SM": "J/(mol·K)",
+                "CPM": "J/(mol·K)"
+            },
+            "files": files_map
+        });
+        if result_mode == "full" {
+            if let Some(result_obj) = output.get_mut("result").and_then(|r| r.as_object_mut()) {
+                result_obj.insert("raw_data".to_string(), raw);
+            }
+        }
+        Ok(serde_json::to_string(&output).unwrap_or_default())
+    }
+
+    // ── boiling_point 结果处理 ────────────────────────────────────────
+    async fn handle_boiling_result(
+        &self,
+        client: &CalphaMeshClient,
+        file_urls: &[String],
+        files_map: &serde_json::Value,
+        task_id: i32,
+    ) -> Result<String, CalphaMeshError> {
+        let url = file_urls.iter()
+            .find(|u| extract_filename(u) == "boiling_melting_point.csv")
+            .ok_or_else(|| CalphaMeshError::HttpError("boiling_melting_point.csv not found".to_string()))?;
+        let content = client.download_file_content(url).await?;
+        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+
+        if lines.len() < 2 {
+            let output = json!({
+                "task_id": task_id,
+                "task_type": "boiling_point",
+                "status": "completed",
+                "result": {"data_summary": {"note": "计算完成但无法解析结果，请查看原始文件"}},
+                "files": files_map
+            });
+            return Ok(serde_json::to_string(&output).unwrap_or_default());
+        }
+
+        let headers: Vec<&str> = lines[0].split(',').map(|s| s.trim()).collect();
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        let mut derived = serde_json::Map::new();
+
+        for line in &lines[1..] {
+            let cols: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            let mut row = serde_json::Map::new();
+            for (i, h) in headers.iter().enumerate() {
+                if let Some(v) = cols.get(i) {
+                    if let Ok(num) = v.parse::<f64>() {
+                        row.insert(h.to_string(), json!(num));
+                        // 提取关键熔点/沸点信息
+                        let h_up = h.to_uppercase();
+                        if h_up.contains("SOLIDUS") || h_up.contains("MELTING") || h_up.contains("SOLID") {
+                            derived.insert("solidus_K".to_string(), json!(num));
+                        }
+                        if h_up.contains("LIQUIDUS") || h_up.contains("LIQUID") {
+                            derived.insert("liquidus_K".to_string(), json!(num));
+                        }
+                        if h_up.contains("BUBBLE") || h_up.contains("BOIL") {
+                            derived.insert("bubble_point_K".to_string(), json!(num));
+                        }
+                        if h_up.contains("DEW") {
+                            derived.insert("dew_point_K".to_string(), json!(num));
+                        }
+                    } else {
+                        row.insert(h.to_string(), json!(v));
+                    }
+                }
+            }
+            rows.push(json!(row));
+        }
+
+        let output = json!({
+            "task_id": task_id,
+            "task_type": "boiling_point",
+            "status": "completed",
+            "result": {
+                "data_summary": {
+                    "columns": headers,
+                    "rows": rows
+                },
+                "derived_metrics": derived
+            },
+            "units": {"temperature": "K", "pressure": "Pa"},
+            "files": files_map
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1720,7 +2355,7 @@ impl Tool for ListTasks {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 第二阶段工具（已有代码但尚未注册到 MCP）保持原样
+// 扩展工具：二元相图、三元相图、沸点、热力学性质（全部注册到 MCP）
 // ═══════════════════════════════════════════════════════════════════
 
 #[derive(Deserialize, Serialize, Default)]
@@ -1728,39 +2363,86 @@ pub struct SubmitBinaryTask {
     pub api_key: Option<String>,
 }
 
+impl SubmitBinaryTask {
+    pub fn new(api_key: String) -> Self {
+        Self { api_key: Some(api_key) }
+    }
+}
+
 impl Tool for SubmitBinaryTask {
     const NAME: &'static str = "calphamesh_submit_binary_task";
     type Error = CalphaMeshError;
     type Args = BinaryTaskParams;
     type Output = String;
+
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "提交二元平衡相图计算任务".to_string(),
+            description: "提交二元平衡相图计算任务。在两端点成分之间扫描温度区间，计算 Al-Si 等二元系的平衡相图数据。\n\n任务异步执行（典型耗时 20-60 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**Al-Si 二元相图（推荐用法）**：\n- components=[\"AL\",\"SI\"]，tdb_file=\"Al-Si-Mg-Fe-Mn_by_wf.TDB\"\n- start_composition Al=1/SI=0（纯铝端），end_composition Al=0.7/SI=0.3（30%Si端）\n- temperature_start=500K，temperature_end=1200K".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                   "components": {"type": "array", "items": {"type": "string"}},
-                   "start_composition": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "end_composition": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "start_temperature": {"type": "number"},
-                   "end_temperature": {"type": "number"},
+                    "components": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "二元体系元素列表，必须恰好 2 个元素，大写，如 [\"AL\",\"SI\"]。",
+                        "minItems": 2,
+                        "maxItems": 2
+                    },
+                    "start_composition": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "Al 端（富铝侧）成分，原子分数之和须等于 1.0。示例：{\"AL\":1.0,\"SI\":0.0}"
+                    },
+                    "end_composition": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "Si 端（富 Si 侧）成分，原子分数之和须等于 1.0。示例：{\"AL\":0.7,\"SI\":0.3}"
+                    },
+                    "start_temperature": {
+                        "type": "number",
+                        "description": "相图计算温度下限，单位 K，范围 200~6000。",
+                        "minimum": 200,
+                        "maximum": 6000
+                    },
+                    "end_temperature": {
+                        "type": "number",
+                        "description": "相图计算温度上限，单位 K，须大于 start_temperature。",
+                        "minimum": 200,
+                        "maximum": 6000
+                    },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "TDB 数据库文件名。"
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。Al-Si 二元相图选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
                     }
                 },
-                "required": ["components", "start_composition", "end_composition", "start_temperature", "end_temperature", "tdb_file"]
+                "required": ["components", "start_composition", "end_composition", "start_temperature", "end_temperature", "tdb_file"],
+                "additionalProperties": false
             }),
         }
     }
+
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // 基础校验
+        validate_composition_sum(&args.start_composition)?;
+        validate_composition_sum(&args.end_composition)?;
+        validate_tdb_contains_elements(&args.tdb_file, &args.components)?;
         let api_key = get_api_key(&args.api_key, &self.api_key)?;
+        let system = format_components_summary(&args.components);
+        let t_start = args.start_temperature;
+        let t_end = args.end_temperature;
         let client = CalphaMeshClient::new(api_key);
         let resp = client.submit_binary_task(args).await?;
-        Ok(serde_json::to_string(&json!({"task_id": resp.id, "status": resp.status}))
-            .unwrap_or_default())
+        let output = json!({
+            "task_id": resp.id,
+            "status": resp.status,
+            "task_type": "binary_equilibrium",
+            "summary": format!("Binary 相图任务已提交：{} 体系，温度范围 {}~{} K", system, t_start, t_end),
+            "estimated_wait_seconds": 40,
+            "next_action": format!("调用 calphamesh_get_task_result(task_id={}) 等待并获取结果", resp.id)
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
     }
 }
 
@@ -1769,39 +2451,84 @@ pub struct SubmitTernaryTask {
     pub api_key: Option<String>,
 }
 
+impl SubmitTernaryTask {
+    pub fn new(api_key: String) -> Self {
+        Self { api_key: Some(api_key) }
+    }
+}
+
 impl Tool for SubmitTernaryTask {
     const NAME: &'static str = "calphamesh_submit_ternary_task";
     type Error = CalphaMeshError;
     type Args = TernaryTaskParams;
     type Output = String;
+
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "提交三元组计算任务".to_string(),
+            description: "提交三元等温截面计算任务。在给定温度下计算三元相图（成分三角形），输出相区边界、共轭线（tie-line）和三相三角（tie-triangle）数据，可直接用于 Plotly 可视化。\n\n任务异步执行（典型耗时 30-120 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**Al-Mg-Si 三元截面（推荐用法）**：\n- components=[\"AL\",\"MG\",\"SI\"]，tdb_file=\"Al-Si-Mg-Fe-Mn_by_wf.TDB\"\n- temperature=773K（时效温度附近）\n- 三顶点分别为纯 AL、纯 MG、纯 SI".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                   "components": {"type": "array", "items": {"type": "string"}},
-                   "temperature": {"type": "number"},
-                   "composition_x": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "composition_y": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "composition_o": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "tdb_file": {
+                    "components": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "三元体系元素列表，必须恰好 3 个元素，大写，如 [\"AL\",\"MG\",\"SI\"]。",
+                        "minItems": 3,
+                        "maxItems": 3
+                    },
+                    "temperature": {
+                        "type": "number",
+                        "description": "等温截面温度，单位 K，范围 200~6000。典型 Al-Mg-Si 析出研究用 773K（500°C）。",
+                        "minimum": 200,
+                        "maximum": 6000
+                    },
+                    "composition_y": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "三角形顶点 Y 的成分（通常为第一个组元的纯元素端），原子分数之和须等于 1.0。示例：{\"AL\":1.0,\"MG\":0.0,\"SI\":0.0}"
+                    },
+                    "composition_x": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "三角形顶点 X 的成分（通常为第二个组元的纯元素端），原子分数之和须等于 1.0。示例：{\"AL\":0.0,\"MG\":1.0,\"SI\":0.0}"
+                    },
+                    "composition_o": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "三角形顶点 O 的成分（通常为第三个组元的纯元素端），原子分数之和须等于 1.0。示例：{\"AL\":0.0,\"MG\":0.0,\"SI\":1.0}"
+                    },
+                    "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "TDB 数据库文件名。"
-                   }
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。Al-Mg-Si 三元相图选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                    }
                 },
-                "required": ["components", "temperature", "composition_x", "composition_y", "composition_o", "tdb_file"]
+                "required": ["components", "temperature", "composition_y", "composition_x", "composition_o", "tdb_file"],
+                "additionalProperties": false
             }),
         }
     }
+
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        validate_composition_sum(&args.composition_x)?;
+        validate_composition_sum(&args.composition_y)?;
+        validate_composition_sum(&args.composition_o)?;
+        validate_tdb_contains_elements(&args.tdb_file, &args.components)?;
         let api_key = get_api_key(&args.api_key, &self.api_key)?;
+        let system = format_components_summary(&args.components);
+        let temp = args.temperature;
         let client = CalphaMeshClient::new(api_key);
         let resp = client.submit_ternary_task(args).await?;
-        Ok(serde_json::to_string(&json!({"task_id": resp.id, "status": resp.status}))
-            .unwrap_or_default())
+        let output = json!({
+            "task_id": resp.id,
+            "status": resp.status,
+            "task_type": "ternary_calculation",
+            "summary": format!("Ternary 相图任务已提交：{} 体系，等温截面 {} K", system, temp),
+            "estimated_wait_seconds": 60,
+            "next_action": format!("调用 calphamesh_get_task_result(task_id={}) 等待并获取结果", resp.id)
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
     }
 }
 
@@ -1810,38 +2537,77 @@ pub struct SubmitBoilingPointTask {
     pub api_key: Option<String>,
 }
 
+impl SubmitBoilingPointTask {
+    pub fn new(api_key: String) -> Self {
+        Self { api_key: Some(api_key) }
+    }
+}
+
 impl Tool for SubmitBoilingPointTask {
     const NAME: &'static str = "calphamesh_submit_boiling_point_task";
     type Error = CalphaMeshError;
     type Args = BoilingPointParams;
     type Output = String;
+
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "提交沸点计算任务".to_string(),
+            description: "提交沸点/熔点搜索任务。在给定压力和温度搜索区间内，计算指定成分的固相线（solidus）、液相线（liquidus）、泡点（bubble point）和露点（dew point）。\n\n任务异步执行（典型耗时 15-30 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**适用场景**：纯元素或简单组分的熔点/沸点计算。多元合金的液相线/固相线推荐改用 Scheil 模拟。\n\n**注意**：pressure 单位为 Pa（不是 log10），常压为 101325 Pa。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                   "components": {"type": "array", "items": {"type": "string"}},
-                   "composition": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "pressure": {"type": "number"},
-                   "temperature_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
-                   "tdb_file": {
+                    "components": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "组元列表，大写，如 [\"AL\"]（单元素）。",
+                        "minItems": 1
+                    },
+                    "composition": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "各组元原子分数，所有值之和须等于 1.0。纯铝示例：{\"AL\":1.0}"
+                    },
+                    "pressure": {
+                        "type": "number",
+                        "description": "计算压力，单位 Pa（帕斯卡）。常压为 101325 Pa。",
+                        "minimum": 1,
+                        "maximum": 1e10
+                    },
+                    "temperature_range": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "搜索温度区间 [T_min, T_max]，单位 K。铝的熔点/沸点搜索推荐 [800, 4000]。"
+                    },
+                    "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "TDB 数据库文件名。"
-                   }
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。纯 Al 的沸点/熔点选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                    }
                 },
-                "required": ["components", "composition", "pressure", "temperature_range", "tdb_file"]
+                "required": ["components", "composition", "pressure", "temperature_range", "tdb_file"],
+                "additionalProperties": false
             }),
         }
     }
+
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        validate_composition_sum(&args.composition)?;
+        validate_tdb_contains_elements(&args.tdb_file, &args.components)?;
         let api_key = get_api_key(&args.api_key, &self.api_key)?;
+        let system = format_components_summary(&args.components);
         let client = CalphaMeshClient::new(api_key);
         let resp = client.submit_boiling_point_task(args).await?;
-        Ok(serde_json::to_string(&json!({"task_id": resp.id, "status": resp.status}))
-            .unwrap_or_default())
+        let output = json!({
+            "task_id": resp.id,
+            "status": resp.status,
+            "task_type": "boiling_point",
+            "summary": format!("沸点/熔点任务已提交：{} 体系", system),
+            "estimated_wait_seconds": 20,
+            "next_action": format!("调用 calphamesh_get_task_result(task_id={}) 等待并获取结果", resp.id)
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
     }
 }
 
@@ -1850,42 +2616,111 @@ pub struct SubmitThermoPropertiesTask {
     pub api_key: Option<String>,
 }
 
+impl SubmitThermoPropertiesTask {
+    pub fn new(api_key: String) -> Self {
+        Self { api_key: Some(api_key) }
+    }
+}
+
 impl Tool for SubmitThermoPropertiesTask {
     const NAME: &'static str = "calphamesh_submit_thermodynamic_properties_task";
     type Error = CalphaMeshError;
     type Args = ThermoPropertiesParams;
     type Output = String;
+
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "提交热力学性质计算任务".to_string(),
+            description: "提交热力学性质扫描任务。在给定成分下，沿温度（和压力）区间计算摩尔 Gibbs 自由能（GM）、摩尔焓（HM）、摩尔熵（SM）、摩尔定压热容（CPM）等热力学函数随温度的变化曲线。\n\n任务异步执行（典型耗时 15-40 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**压力参数说明**：pressure_start/pressure_end 是 log10(P/Pa) 而非直接压力值。常压（100000 Pa）对应 pressure_start=pressure_end=5。\n\n**推荐用法（Al 合金）**：temperature_start=500, temperature_end=950, increments=25, pressure_start=5, pressure_end=5, pressure_increments=2, properties=[\"GM\",\"HM\",\"SM\",\"CPM\"]".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                   "components": {"type": "array", "items": {"type": "string"}},
-                   "composition": {"type": "object", "additionalProperties": {"type": "number"}},
-                   "temperature_start": {"type": "number"},
-                   "temperature_end": {"type": "number"},
-                   "increments": {"type": "integer"},
-                   "pressure_start": {"type": "number"},
-                   "pressure_end": {"type": "number"},
-                   "pressure_increments": {"type": "integer"},
-                   "properties": {"type": "array", "items": {"type": "string"}},
-                   "tdb_file": {
+                    "components": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "合金元素列表，大写，如 [\"AL\",\"SI\",\"MG\",\"FE\",\"MN\"]。",
+                        "minItems": 2
+                    },
+                    "composition": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                        "description": "合金成分（原子分数），所有值之和须等于 1.0。"
+                    },
+                    "temperature_start": {
+                        "type": "number",
+                        "description": "起始温度，单位 K，范围 200~6000。",
+                        "minimum": 200,
+                        "maximum": 6000
+                    },
+                    "temperature_end": {
+                        "type": "number",
+                        "description": "终止温度，单位 K，须大于 temperature_start。",
+                        "minimum": 200,
+                        "maximum": 6000
+                    },
+                    "increments": {
+                        "type": "integer",
+                        "description": "温度步长，单位 K。推荐 5~25 K，建议 25 K（快速扫描）或 5 K（精细分析）。",
+                        "minimum": 1,
+                        "maximum": 200
+                    },
+                    "pressure_start": {
+                        "type": "number",
+                        "description": "起始压力，以 log10(P/Pa) 表示。常压 = 5（即 10^5 Pa = 100000 Pa）。",
+                        "minimum": 0,
+                        "maximum": 15
+                    },
+                    "pressure_end": {
+                        "type": "number",
+                        "description": "终止压力，以 log10(P/Pa) 表示。常压扫描时与 pressure_start 相同，均设为 5。",
+                        "minimum": 0,
+                        "maximum": 15
+                    },
+                    "pressure_increments": {
+                        "type": "integer",
+                        "description": "压力扫描步数（对数压力步长）。常压计算时设为 2（最小值），相当于固定压力。",
+                        "minimum": 1,
+                        "maximum": 50
+                    },
+                    "properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["GM", "HM", "SM", "CPM"]
+                        },
+                        "description": "需要输出的热力学性质列表。GM=摩尔吉布斯自由能(J/mol), HM=摩尔焓(J/mol), SM=摩尔熵(J/mol/K), CPM=摩尔定压热容(J/mol/K)。推荐全选：[\"GM\",\"HM\",\"SM\",\"CPM\"]",
+                        "minItems": 1
+                    },
+                    "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB"],
-                        "description": "TDB 数据库文件名。"
-                   }
+                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
+                        "description": "热力学数据库文件名。Al 合金热力学性质选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                    }
                 },
-                "required": ["components", "composition", "temperature_start", "temperature_end", "increments", "pressure_start", "pressure_end", "pressure_increments", "properties", "tdb_file"]
+                "required": ["components", "composition", "temperature_start", "temperature_end", "increments", "pressure_start", "pressure_end", "pressure_increments", "properties", "tdb_file"],
+                "additionalProperties": false
             }),
         }
     }
+
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        validate_composition_sum(&args.composition)?;
+        validate_tdb_contains_elements(&args.tdb_file, &args.components)?;
         let api_key = get_api_key(&args.api_key, &self.api_key)?;
+        let system = format_components_summary(&args.components);
+        let t_start = args.temperature_start;
+        let t_end = args.temperature_end;
         let client = CalphaMeshClient::new(api_key);
         let resp = client.submit_thermo_properties_task(args).await?;
-        Ok(serde_json::to_string(&json!({"task_id": resp.id, "status": resp.status}))
-            .unwrap_or_default())
+        let output = json!({
+            "task_id": resp.id,
+            "status": resp.status,
+            "task_type": "thermodynamic_properties",
+            "summary": format!("热力学性质任务已提交：{} 体系，温度范围 {}~{} K", system, t_start, t_end),
+            "estimated_wait_seconds": 25,
+            "next_action": format!("调用 calphamesh_get_task_result(task_id={}) 等待并获取结果", resp.id)
+        });
+        Ok(serde_json::to_string(&output).unwrap_or_default())
     }
 }
+
