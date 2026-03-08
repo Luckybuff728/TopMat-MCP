@@ -1316,9 +1316,41 @@ impl Tool for GetTaskResult {
             ));
         }
 
-        let file_resp = client.get_result_files(task.id).await?;
-        let files_map = build_files_map(&file_resp.files);
+        // 偶发原因：后端将任务标为 completed 后，结果文件写入/索引可能存在延迟，
+        // 首次 get_result_files 可能返回 []，短时等待后重试可恢复。最多重试 2 次，每次间隔 5 秒。
+        const RESULT_FILES_RETRY_DELAY_SECS: u64 = 5;
+        const RESULT_FILES_MAX_RETRIES: u32 = 2;
 
+        let mut file_resp = client.get_result_files(task.id).await?;
+        for attempt in 0..=RESULT_FILES_MAX_RETRIES {
+            let file_names: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
+            let has_results_json = file_names.iter().any(|n| n == "results.json");
+            let has_scheil_json = file_names.iter().any(|n| n == "scheil_solidification.json");
+            let has_scheil_csv = file_names.iter().any(|n| n == "scheil_solidification.csv");
+            let has_binary_json = file_names.iter().any(|n| n == "binary_equilibrium.json");
+            let has_ternary_json = file_names.iter().any(|n| n == "ternary_plotly.json");
+            let has_thermo_json = file_names.iter().any(|n| n == "thermodynamic_properties.json");
+            let has_thermo_csv = file_names.iter().any(|n| n == "thermodynamic_properties.csv");
+            let has_boiling_csv = file_names.iter().any(|n| n == "boiling_melting_point.csv");
+            let has_line_csv = file_names.iter().any(|n| {
+                n.ends_with(".csv")
+                    && n != "scheil_solidification.csv"
+                    && n != "boiling_melting_point.csv"
+            });
+            let has_actual_result = has_results_json || has_scheil_json || has_scheil_csv
+                || has_binary_json || has_ternary_json
+                || has_thermo_json || has_thermo_csv
+                || has_boiling_csv || has_line_csv;
+            if has_actual_result {
+                break;
+            }
+            if attempt < RESULT_FILES_MAX_RETRIES {
+                tokio::time::sleep(std::time::Duration::from_secs(RESULT_FILES_RETRY_DELAY_SECS)).await;
+                file_resp = client.get_result_files(task.id).await?;
+            }
+        }
+
+        let files_map = build_files_map(&file_resp.files);
         let file_names: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
 
         // ── 结果文件检测 ──────────────────────────────────────────────
@@ -1345,7 +1377,7 @@ impl Tool for GetTaskResult {
         });
         // scheil_conditions.json = 仅是输入条件回显，不代表计算成功，不计入
 
-        // 无实际结果文件：仅有 output.log 或仅有条件回显文件
+        // 无实际结果文件：仅有 output.log 或仅有条件回显文件（含重试后仍为空）
         let has_actual_result = has_results_json || has_scheil_json || has_scheil_csv
             || has_binary_json || has_ternary_json
             || has_thermo_json || has_thermo_csv
