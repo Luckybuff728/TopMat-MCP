@@ -37,9 +37,18 @@ logs/
 *.tmp
 *.temp
 
-# Test files
+# MCP 工具配置模板（含 TDB 等，不提交）
+src/server/mcp/tools/config_templates_al/
+
+# Test files & scripts
 test_results/
 coverage/
+test_*.py
+check_*.py
+*_test.py
+*_test.sh
+run_*test*.py
+run_*test*.sh
 
 # Build artifacts
 /target/
@@ -65,8 +74,6 @@ __pycache__/
 env/
 venv/
 ENV/
-test_*.py
-check_*.py
 
 # doc
 docs/
@@ -76,4 +83,3 @@ docs/
 AGENTS.md
 CLAUDE.md
 TopMat-LLM
-
