@@ -141,10 +141,21 @@ impl From<serde_json::Error> for CalphaMeshError {
 /// 使提交给 TopThermo 的数值严格等于 1.0。
 /// 误差超过 2% 视为参数严重错误，返回 Err。
 fn normalize_composition(composition: &HashMap<String, f64>) -> Result<HashMap<String, f64>, CalphaMeshError> {
-    let sum: f64 = composition.values().sum();
+    // 1. 对极小值组元做下限 clamp：避免求解器 ZeroDivisionError
+    //    MN/FE 等痕量元素在 AI 生成时常出现 1e-6/1e-7，求解器最低接受 1e-4
+    const MIN_TRACE: f64 = 1e-4;
+    let clamped: HashMap<String, f64> = composition
+        .iter()
+        .map(|(k, &v)| {
+            let v_clamped = if v > 0.0 && v < MIN_TRACE { MIN_TRACE } else { v };
+            (k.clone(), v_clamped)
+        })
+        .collect();
+
+    let sum: f64 = clamped.values().sum();
     const HARD_LIMIT: f64 = 2e-2;
     if (sum - 1.0).abs() > HARD_LIMIT {
-        let detail: Vec<String> = composition
+        let detail: Vec<String> = clamped
             .iter()
             .map(|(k, v)| format!("{}={:.6}", k, v))
             .collect();
@@ -154,7 +165,8 @@ fn normalize_composition(composition: &HashMap<String, f64>) -> Result<HashMap<S
             detail.join(", ")
         )));
     }
-    Ok(composition
+    // 2. 归一化：保证求解器接收到的成分严格等于 1.0
+    Ok(clamped
         .iter()
         .map(|(k, v)| (k.clone(), v / sum))
         .collect())
@@ -1409,22 +1421,54 @@ impl Tool for GetTaskResult {
                 .find(|u| extract_filename(u) == "output.log")
                 .cloned()
                 .unwrap_or_default();
-            let log_hint = if !log_url.is_empty() {
-                format!(" 日志文件: {}", log_url)
+
+            // 尝试下载 output.log 并提取关键错误信息，让下游 Agent 直接感知失败原因
+            let log_excerpt = if !log_url.is_empty() {
+                match client.download_file_content(&log_url).await {
+                    Ok(log_text) => {
+                        // 提取"错误摘要"块和 traceback 末尾几行（避免返回过长内容）
+                        let mut lines: Vec<&str> = log_text.lines().collect();
+                        // 找到错误摘要段落（"=== 错误摘要 ===" 或 "Error:" 行）
+                        let summary_start = lines.iter().position(|l| {
+                            l.contains("ZeroDivisionError")
+                                || l.contains("Error:")
+                                || l.contains("failed:")
+                                || l.contains("RuntimeError")
+                                || l.contains("Traceback")
+                        });
+                        let excerpt = if let Some(pos) = summary_start {
+                            // 从第一处错误行往后取最多 20 行
+                            lines[pos..].iter().take(20).cloned().collect::<Vec<_>>().join("\n")
+                        } else {
+                            // 没找到明确错误行，取最后 15 行
+                            let start = lines.len().saturating_sub(15);
+                            lines[start..].join("\n")
+                        };
+                        excerpt
+                    }
+                    Err(_) => String::new(),
+                }
             } else {
                 String::new()
             };
+
             let all_files: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
-            let output = serde_json::json!({
+            let mut output = serde_json::json!({
                 "error_code": "no_result_files",
                 "task_id": args.task_id,
                 "message": format!(
-                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中可能出现错误。{}",
-                    all_files, log_hint
+                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中出现错误。",
+                    all_files
                 ),
                 "retryable": true,
                 "details": "请检查 components/composition/tdb_file 是否正确，或调整参数后重新提交"
             });
+            if !log_excerpt.is_empty() {
+                output["log_excerpt"] = serde_json::Value::String(log_excerpt);
+            }
+            if !log_url.is_empty() {
+                output["log_url"] = serde_json::Value::String(log_url);
+            }
             return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
             ));
