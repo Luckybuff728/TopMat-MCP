@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
-use tracing::warn;
 
 use rig::{completion::ToolDefinition, tool::Tool};
 
@@ -142,21 +141,10 @@ impl From<serde_json::Error> for CalphaMeshError {
 /// 使提交给 TopThermo 的数值严格等于 1.0。
 /// 误差超过 2% 视为参数严重错误，返回 Err。
 fn normalize_composition(composition: &HashMap<String, f64>) -> Result<HashMap<String, f64>, CalphaMeshError> {
-    // 1. 对极小值组元做下限 clamp：避免求解器 ZeroDivisionError
-    //    MN/FE 等痕量元素在 AI 生成时常出现 1e-6/1e-7，求解器最低接受 1e-4
-    const MIN_TRACE: f64 = 1e-4;
-    let clamped: HashMap<String, f64> = composition
-        .iter()
-        .map(|(k, &v)| {
-            let v_clamped = if v > 0.0 && v < MIN_TRACE { MIN_TRACE } else { v };
-            (k.clone(), v_clamped)
-        })
-        .collect();
-
-    let sum: f64 = clamped.values().sum();
+    let sum: f64 = composition.values().sum();
     const HARD_LIMIT: f64 = 2e-2;
     if (sum - 1.0).abs() > HARD_LIMIT {
-        let detail: Vec<String> = clamped
+        let detail: Vec<String> = composition
             .iter()
             .map(|(k, v)| format!("{}={:.6}", k, v))
             .collect();
@@ -166,8 +154,7 @@ fn normalize_composition(composition: &HashMap<String, f64>) -> Result<HashMap<S
             detail.join(", ")
         )));
     }
-    // 2. 归一化：保证求解器接收到的成分严格等于 1.0
-    Ok(clamped
+    Ok(composition
         .iter()
         .map(|(k, v)| (k.clone(), v / sum))
         .collect())
@@ -193,43 +180,6 @@ fn validate_components_match_composition(
         )));
     }
     Ok(())
-}
-
-/// 自动补全 TDB 所需但缺失的元素：
-/// - 在 components 中添加缺失元素
-/// - 在 composition 中为缺失元素设置 MIN_TRACE (1e-4)
-/// - 重新归一化使总和严格为 1.0
-/// 仅对非 binary/ternary 多元任务调用（binary/ternary 只用部分元素是合法的）
-fn auto_complete_tdb_elements(
-    tdb_file: &str,
-    components: &mut Vec<String>,
-    composition: &mut HashMap<String, f64>,
-) {
-    const MIN_TRACE: f64 = 1e-4;
-    if let Some(required) = tdb_elements(tdb_file) {
-        let mut added = false;
-        for &elem in required {
-            let elem_str = elem.to_string();
-            if !components.contains(&elem_str) {
-                warn!(
-                    "TDB {} 需要元素 {} 但未提供，自动补入 {}={}",
-                    tdb_file, elem, elem, MIN_TRACE
-                );
-                components.push(elem_str.clone());
-                composition.insert(elem_str, MIN_TRACE);
-                added = true;
-            }
-        }
-        if added {
-            // 重新归一化
-            let sum: f64 = composition.values().sum();
-            if sum > 0.0 {
-                for v in composition.values_mut() {
-                    *v /= sum;
-                }
-            }
-        }
-    }
 }
 
 fn validate_tdb_contains_elements(
@@ -633,9 +583,8 @@ impl CalphaMeshClient {
 
     pub async fn submit_point_task(
         &self,
-        mut params: PointTaskParams,
+        params: PointTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.composition);
         let phases = tdb_default_phases(&params.tdb_file);
         let composition = normalize_composition(&params.composition)?;
         let inner = json!({
@@ -660,15 +609,8 @@ impl CalphaMeshClient {
 
     pub async fn submit_line_task(
         &self,
-        mut params: LineTaskParams,
+        params: LineTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.start_composition);
-        // end_composition 也需要同步补全相同元素
-        for elem in params.components.clone() {
-            if !params.end_composition.contains_key(&elem) {
-                params.end_composition.insert(elem, 1e-4);
-            }
-        }
         let phases = tdb_default_phases(&params.tdb_file);
         let start_composition = normalize_composition(&params.start_composition)?;
         let end_composition = normalize_composition(&params.end_composition)?;
@@ -697,9 +639,8 @@ impl CalphaMeshClient {
 
     pub async fn submit_scheil_task(
         &self,
-        mut params: ScheilTaskParams,
+        params: ScheilTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.composition);
         let phases = tdb_default_phases(&params.tdb_file);
         let composition = normalize_composition(&params.composition)?;
         let inner = json!({
@@ -824,9 +765,9 @@ impl CalphaMeshClient {
 
     pub async fn submit_thermo_properties_task(
         &self,
-        mut params: ThermoPropertiesParams,
+        params: ThermoPropertiesParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.composition);
+        // 热力学性质任务使用与 point/line 相同的 5 元相集合
         let phases = tdb_default_phases(&params.tdb_file);
         let composition = normalize_composition(&params.composition)?;
         let inner = json!({
@@ -1468,54 +1409,22 @@ impl Tool for GetTaskResult {
                 .find(|u| extract_filename(u) == "output.log")
                 .cloned()
                 .unwrap_or_default();
-
-            // 尝试下载 output.log 并提取关键错误信息，让下游 Agent 直接感知失败原因
-            let log_excerpt = if !log_url.is_empty() {
-                match client.download_file_content(&log_url).await {
-                    Ok(log_text) => {
-                        // 提取"错误摘要"块和 traceback 末尾几行（避免返回过长内容）
-                        let mut lines: Vec<&str> = log_text.lines().collect();
-                        // 找到错误摘要段落（"=== 错误摘要 ===" 或 "Error:" 行）
-                        let summary_start = lines.iter().position(|l| {
-                            l.contains("ZeroDivisionError")
-                                || l.contains("Error:")
-                                || l.contains("failed:")
-                                || l.contains("RuntimeError")
-                                || l.contains("Traceback")
-                        });
-                        let excerpt = if let Some(pos) = summary_start {
-                            // 从第一处错误行往后取最多 20 行
-                            lines[pos..].iter().take(20).cloned().collect::<Vec<_>>().join("\n")
-                        } else {
-                            // 没找到明确错误行，取最后 15 行
-                            let start = lines.len().saturating_sub(15);
-                            lines[start..].join("\n")
-                        };
-                        excerpt
-                    }
-                    Err(_) => String::new(),
-                }
+            let log_hint = if !log_url.is_empty() {
+                format!(" 日志文件: {}", log_url)
             } else {
                 String::new()
             };
-
             let all_files: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
-            let mut output = serde_json::json!({
+            let output = serde_json::json!({
                 "error_code": "no_result_files",
                 "task_id": args.task_id,
                 "message": format!(
-                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中出现错误。",
-                    all_files
+                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中可能出现错误。{}",
+                    all_files, log_hint
                 ),
                 "retryable": true,
                 "details": "请检查 components/composition/tdb_file 是否正确，或调整参数后重新提交"
             });
-            if !log_excerpt.is_empty() {
-                output["log_excerpt"] = serde_json::Value::String(log_excerpt);
-            }
-            if !log_url.is_empty() {
-                output["log_url"] = serde_json::Value::String(log_url);
-            }
             return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
             ));
