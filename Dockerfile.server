@@ -20,7 +20,7 @@ COPY src ./src
 COPY rig ./rig
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM docker.m.daocloud.io/library/debian:bookworm-slim
 RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
     /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     (echo "deb http://mirrors.aliyun.com/debian/ bookworm main" > /etc/apt/sources.list && \
