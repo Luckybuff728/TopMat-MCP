@@ -214,12 +214,14 @@ fn validate_composition_sum(composition: &HashMap<String, f64>) -> Result<(), Ca
 
 /// 过滤 composition=0.0 的组元，同步更新 components 列表，然后重新归一化。
 /// 例如：LLM 给出 MN=0.0 时，自动将其从计算体系中移除，避免后端静默失败（返回空 phases）。
+/// 注意：此函数仅过滤精确为 0 的组元，不过滤极小值。极小值过滤是
+/// thermodynamic_properties 特有需求，在 submit_thermo_properties_task 中单独处理。
 /// 返回：(清洗后的 components, 归一化后的 composition)
 fn sanitize_composition_and_components(
     components: &[String],
     composition: &HashMap<String, f64>,
 ) -> Result<(Vec<String>, HashMap<String, f64>), CalphaMeshError> {
-    // 过滤掉值为 0（或负数）的组元
+    // 仅过滤掉值为 0 或负数的组元
     let filtered: HashMap<String, f64> = composition
         .iter()
         .filter(|(_, v)| **v > 0.0)
@@ -240,7 +242,7 @@ fn sanitize_composition_and_components(
         .map(|s| s.as_str())
         .collect();
 
-    // 更新 components 列表（保持原始顺序，移除 0.0 成分的元素）
+    // 更新 components 列表（保持原始顺序，移除 0 成分的元素）
     let new_components: Vec<String> = components
         .iter()
         .filter(|c| filtered.contains_key(*c))
@@ -872,8 +874,50 @@ impl CalphaMeshClient {
         &self,
         params: ThermoPropertiesParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        let (components, composition) =
+        let (mut components, mut composition) =
             sanitize_composition_and_components(&params.components, &params.composition)?;
+
+        // thermodynamic_properties 专用：移除极小摩尔分数组元（< 5e-4）。
+        // 后端 metaproperties.py 中 write_row_fixed_mole_fraction 在极小分数时
+        // 会触发 ZeroDivisionError（float division），但仅影响此任务类型。
+        // 对 point/line/scheil 等任务，痕量元素有物理意义，不应移除。
+        const THERMO_MIN_FRAC: f64 = 5e-4;
+        let trace_removed: Vec<String> = composition
+            .iter()
+            .filter(|(_, v)| **v > 0.0 && **v < THERMO_MIN_FRAC)
+            .map(|(k, _)| k.clone())
+            .collect();
+        if !trace_removed.is_empty() {
+            for key in &trace_removed {
+                composition.remove(key);
+            }
+            components.retain(|c| !trace_removed.contains(c));
+            let sum: f64 = composition.values().sum();
+            for v in composition.values_mut() {
+                *v /= sum;
+            }
+            tracing::warn!(
+                "thermo_properties: 已移除极小组元 {:?}（< {:.0e}，会触发 solver ZeroDivisionError），剩余体系: {:?}",
+                trace_removed, THERMO_MIN_FRAC, components
+            );
+        }
+
+        // 使用 Al-Si-Mg-Fe-Mn 五元 TDB 时，若 MN 不在 components 中，
+        // 自动补入微量 MN 并重新归一化。
+        // 原因：该 TDB 含 MN 相参数，后端 solver 在 MN 缺失时会触发 ZeroDivisionError。
+        // 1e-3 量级对铝合金热力学性质结果可忽略不计，且高于 THERMO_MIN_FRAC。
+        if params.tdb_file == "TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB"
+            && !components.iter().any(|c| c == "MN")
+        {
+            let mn_frac = 1e-3_f64;
+            for v in composition.values_mut() {
+                *v *= 1.0 - mn_frac;
+            }
+            composition.insert("MN".to_string(), mn_frac);
+            components.push("MN".to_string());
+            components.sort();
+        }
+
         let phases = filter_phases_for_components(&tdb_default_phases(&params.tdb_file), &components);
         let inner = json!({
             "task_type": "thermodynamic_properties",
@@ -991,33 +1035,41 @@ fn extract_filename(url: &str) -> String {
         .to_string()
 }
 
-/// 从文件列表中找到 output.log，下载后提取关键错误行。
-/// 返回格式：含错误关键词的行（最多 30 行），若无则返回日志末尾 20 行。
+/// 下载 output.log 的原始文本；找不到或下载失败时返回 None。
+async fn download_log(client: &CalphaMeshClient, file_urls: &[String]) -> Option<String> {
+    let log_url = file_urls.iter().find(|u| extract_filename(u) == "output.log")?;
+    client.download_file_content(log_url).await.ok()
+}
+
+/// 过滤 output.log 中的样板行，返回对 Agent 有诊断价值的内容。
+/// 去除每次都一样的 TOPDB 加载行、空行、无害 UserWarning。
+fn strip_log_boilerplate(log_text: &str) -> String {
+    let boilerplate_prefixes = [
+        "Decrypting TOPDB file to memory:",
+        "TOPDB database ID:",
+        "TOPDB read successfully:",
+        "TOPDB loaded:",
+        "UserWarning:",
+        "/app/exe/topthermo-next/dateutil/",
+        "Starting Framework task:",
+        "Running task via TopThermo Framework:",
+    ];
+    log_text
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !boilerplate_prefixes.iter().any(|p| t.starts_with(p))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 从文件列表中找到 output.log，去除样板行后返回。
 /// 下载失败时返回空字符串。
-async fn fetch_log_excerpt(client: &CalphaMeshClient, file_urls: &[String]) -> String {
-    let log_url = match file_urls.iter().find(|u| extract_filename(u) == "output.log") {
-        Some(u) => u,
-        None => return String::new(),
-    };
-    let log_text = match client.download_file_content(log_url).await {
-        Ok(t) => t,
-        Err(_) => return String::new(),
-    };
-    let lines: Vec<&str> = log_text.lines().collect();
-    // 先尝试提取包含错误关键词的行（最多 30 行）
-    let error_keywords = ["Error", "error", "Traceback", "ZeroDivision", "RuntimeError",
-                          "FileNotFoundError", "failed", "FAILED", "Exception", "Critical"];
-    let error_lines: Vec<&str> = lines
-        .iter()
-        .filter(|l| error_keywords.iter().any(|k| l.contains(k)))
-        .copied()
-        .take(30)
-        .collect();
-    if !error_lines.is_empty() {
-        error_lines.join("\n")
-    } else {
-        // 没有明显错误行，返回末尾 20 行（通常含有失败原因）
-        lines.iter().rev().take(20).copied().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n")
+async fn fetch_full_log(client: &CalphaMeshClient, file_urls: &[String]) -> String {
+    match download_log(client, file_urls).await {
+        Some(text) => strip_log_boilerplate(&text),
+        None => String::new(),
     }
 }
 
@@ -1462,19 +1514,22 @@ impl Tool for GetTaskResult {
         };
 
         if task.status == "failed" || task.status == "error" {
-            // 尝试获取结果文件中的 output.log，提取错误行辅助诊断
-            let log_excerpt = if let Ok(fr) = client.get_result_files(task.id).await {
-                fetch_log_excerpt(&client, &fr.files).await
+            let mut output_log = if let Ok(fr) = client.get_result_files(task.id).await {
+                fetch_full_log(&client, &fr.files).await
             } else {
                 String::new()
             };
+            // 若 S3 无文件，回退读取 API 直接返回的 logs 字段
+            if output_log.is_empty() {
+                output_log = task.logs.unwrap_or_default();
+            }
             let output = json!({
                 "error_code": "task_failed",
                 "task_id": args.task_id,
                 "message": format!("任务计算失败，后端返回 status: {}", task.status),
-                "log_excerpt": log_excerpt,
+                "output_log": output_log,
                 "retryable": false,
-                "details": "请根据 log_excerpt 中的错误信息检查 tdb_file/components/composition 参数"
+                "details": "请根据 output_log 中的错误信息检查 tdb_file/components/composition 参数"
             });
             return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
@@ -1482,11 +1537,11 @@ impl Tool for GetTaskResult {
         }
 
         // 后端将任务标为 completed 后，结果文件写入对象存储存在异步延迟（实测 5-25 秒）。
-        // 策略：先等 3 秒让 S3 有时间完成写入，再最多重试 4 次（每次间隔 5 秒），
-        // 合计最多等待 3 + 4×5 = 23 秒，覆盖绝大多数延迟情况。
+        // 策略：先等 3 秒让 S3 有时间完成写入，再最多重试 6 次（每次间隔 5 秒），
+        // 合计最多等待 3 + 6×5 = 33 秒，覆盖 ternary 等大型任务的延迟情况。
         const RESULT_FILES_INITIAL_WAIT_SECS: u64 = 3;
         const RESULT_FILES_RETRY_DELAY_SECS: u64 = 5;
-        const RESULT_FILES_MAX_RETRIES: u32 = 4;
+        const RESULT_FILES_MAX_RETRIES: u32 = 6;
 
         tokio::time::sleep(std::time::Duration::from_secs(RESULT_FILES_INITIAL_WAIT_SECS)).await;
         let mut file_resp = client.get_result_files(task.id).await?;
@@ -1503,6 +1558,7 @@ impl Tool for GetTaskResult {
             let has_line_csv = file_names.iter().any(|n| {
                 n.ends_with(".csv")
                     && n != "scheil_solidification.csv"
+                    && n != "thermodynamic_properties.csv"
                     && n != "boiling_melting_point.csv"
             });
             let has_actual_result = has_results_json || has_scheil_json || has_scheil_csv
@@ -1537,10 +1593,11 @@ impl Tool for GetTaskResult {
         let has_thermo_csv = file_names.iter().any(|n| n == "thermodynamic_properties.csv");
         // boiling_point → boiling_melting_point.csv
         let has_boiling_csv = file_names.iter().any(|n| n == "boiling_melting_point.csv");
-        // line_calculation → 任意非 Scheil/Boiling 的 CSV
+        // line_calculation → 任意非 Scheil/Thermo/Boiling 的 CSV
         let has_line_csv = file_names.iter().any(|n| {
             n.ends_with(".csv")
                 && n != "scheil_solidification.csv"
+                && n != "thermodynamic_properties.csv"
                 && n != "boiling_melting_point.csv"
         });
         // scheil_conditions.json = 仅是输入条件回显，不代表计算成功，不计入
@@ -1552,8 +1609,30 @@ impl Tool for GetTaskResult {
             || has_boiling_csv || has_line_csv;
         if !has_actual_result {
             let all_files: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
-            // 尝试下载 output.log，提取关键错误行给下游 Agent 诊断
-            let log_excerpt = fetch_log_excerpt(&client, &file_resp.files).await;
+            let mut output_log = fetch_full_log(&client, &file_resp.files).await;
+            // output.log 未出现时（S3 延迟超出主重试窗口）：再额外等待 15s 专门尝试拿 output.log
+            if output_log.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                if let Ok(retry_files) = client.get_result_files(task.id).await {
+                    output_log = fetch_full_log(&client, &retry_files.files).await;
+                }
+            }
+            // S3 仍无文件时回退读取 API 直接返回的 logs 字段
+            if output_log.is_empty() {
+                output_log = task.logs.clone().unwrap_or_default();
+            }
+            // ZeroDivisionError 是后端 solver 的数值 bug，重试无效
+            let is_zero_division = output_log.contains("ZeroDivisionError");
+            let retryable = !is_zero_division;
+            let details = if is_zero_division {
+                "后端 CALPHAD solver 数值错误（ZeroDivisionError），调整步数或组成不能解决此问题。\
+                 建议：跳过 thermodynamic_properties 改用 point_calculation 在关键温度点单独计算，\
+                 或继续其他任务（binary/ternary/Scheil）。"
+            } else if output_log.is_empty() {
+                "后端未生成任何日志，可能是任务提交参数格式错误或服务端内部错误，请检查 tdb_file/components/composition"
+            } else {
+                "请根据 output_log 中的错误信息调整参数后重新提交"
+            };
             let output = serde_json::json!({
                 "error_code": "no_result_files",
                 "task_id": args.task_id,
@@ -1561,24 +1640,23 @@ impl Tool for GetTaskResult {
                     "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中可能出现错误。",
                     all_files
                 ),
-                "log_excerpt": log_excerpt,
-                "retryable": true,
-                "details": "请根据 log_excerpt 中的错误信息调整参数后重新提交"
+                "output_log": output_log,
+                "retryable": retryable,
+                "details": details
             });
             return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
             ));
         }
 
-        if has_results_json {
+        // 分发到各类型结果处理器，并统一注入 output.log 摘要
+        let handler_result = if has_results_json {
             self.handle_point_result(&client, &file_resp.files, &files_map)
                 .await
         } else if has_scheil_csv {
-            // Scheil CSV 优先（当前后端成功计算时输出的主要格式，字段更可靠）
             self.handle_scheil_csv_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
                 .await
         } else if has_scheil_json {
-            // Scheil JSON（旧版 legacy 格式，仅当没有 CSV 时才使用）
             self.handle_scheil_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
                 .await
         } else if has_binary_json {
@@ -1588,7 +1666,6 @@ impl Tool for GetTaskResult {
             self.handle_ternary_result(&client, &file_resp.files, &files_map, args.task_id)
                 .await
         } else if has_thermo_csv {
-            // 热力学性质 CSV（当前后端主要输出格式）
             self.handle_thermo_csv_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
                 .await
         } else if has_thermo_json {
@@ -1601,7 +1678,6 @@ impl Tool for GetTaskResult {
             self.handle_line_result(&client, &file_resp.files, &files_map, &args.result_mode, args.task_id)
                 .await
         } else {
-            // 有文件但类型未知，返回文件列表让上层感知
             let output = serde_json::json!({
                 "error_code": "unknown_result_format",
                 "task_id": args.task_id,
@@ -1612,9 +1688,27 @@ impl Tool for GetTaskResult {
                 ),
                 "retryable": false
             });
-            Err(CalphaMeshError::ValidationError(
+            return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
-            ))
+            ));
+        };
+
+        // 成功路径：将 output.log 完整内容注入返回 JSON 的 "output_log" 字段
+        // 供下游 Agent 直接读取后端原始日志（数据库版本、实际温度点数、相数等）
+        match handler_result {
+            Ok(json_str) => {
+                let output_log = fetch_full_log(&client, &file_resp.files).await;
+                if output_log.is_empty() {
+                    return Ok(json_str);
+                }
+                let mut val: serde_json::Value = serde_json::from_str(&json_str)
+                    .unwrap_or(serde_json::Value::String(json_str.clone()));
+                if let Some(obj) = val.as_object_mut() {
+                    obj.insert("output_log".to_string(), serde_json::Value::String(output_log));
+                }
+                Ok(serde_json::to_string(&val).unwrap_or(json_str))
+            }
+            Err(e) => Err(e),
         }
     }
 }
@@ -1655,12 +1749,12 @@ impl GetTaskResult {
         // 常见原因：某组元 composition=0（已应被 sanitize 过滤，此处作为兜底检测）
         if dominant_phase.is_empty() && phase_count == 0 {
             // 尝试下载 output.log 获取具体失败原因
-            let log_excerpt = fetch_log_excerpt(client, file_urls).await;
+            let output_log = fetch_full_log(client, file_urls).await;
             let output = serde_json::json!({
                 "error_code": "empty_result",
                 "message": "point_calculation 任务已完成，但返回的 phases 为空、phase_fractions 为空。\
                             后端计算可能因参数问题静默失败（如某组元 composition=0 或温度超出相稳定区间）。",
-                "log_excerpt": log_excerpt,
+                "output_log": output_log,
                 "retryable": true,
                 "details": "请检查：1) composition 中所有元素的值均 > 0；\
                             2) temperature 在该成分的固相线-液相线范围内（推荐 500-1100 K）"
@@ -2205,7 +2299,11 @@ impl GetTaskResult {
             all_nums.push(nums);
         }
 
-        let t_col = headers.iter().position(|h| h.trim().to_uppercase().contains("T/K") || h.trim().to_uppercase() == "T");
+        // 后端 CSV 实际列名为 "Temperature"（非 "T/K" 或 "T"），同时兼容这三种写法
+        let t_col = headers.iter().position(|h| {
+            let ht = h.trim().to_uppercase();
+            ht.contains("T/K") || ht == "T" || ht == "TEMPERATURE"
+        });
         let t_start = t_col.and_then(|i| all_nums.first().and_then(|r| r.get(i)).copied()).unwrap_or(0.0);
         let t_end = t_col.and_then(|i| all_nums.last().and_then(|r| r.get(i)).copied()).unwrap_or(0.0);
 
@@ -2381,10 +2479,25 @@ impl GetTaskResult {
         let raw: serde_json::Value = serde_json::from_str(&content)
             .unwrap_or(serde_json::Value::String(content));
 
-        // 从 JSON 中提取摘要：温度点数量、包含的性质
-        let data_points = raw.get("data").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-        let properties = raw.get("properties").cloned().unwrap_or(json!(["GM","HM","SM","CPM"]));
-        let temperature_range = raw.get("temperature_range").cloned().unwrap_or(json!({}));
+        // 后端 JSON 结构：顶层字段为 metadata / data / plots / summary
+        // data 是 columnar 对象 {"Temperature":[...], "GM(FCC_A1)":[...], ...}，不是数组
+        // properties 和 temperature_range 嵌套在 metadata 下
+        let meta = raw.get("metadata");
+        let data_points = raw
+            .get("data")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("Temperature").or_else(|| obj.values().next()))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let properties = meta
+            .and_then(|m| m.get("properties"))
+            .cloned()
+            .unwrap_or(json!(["GM","HM","SM","CPM"]));
+        let temperature_range = meta
+            .and_then(|m| m.get("temperature_range"))
+            .cloned()
+            .unwrap_or(json!({}));
 
         let mut output = json!({
             "task_id": task_id,
