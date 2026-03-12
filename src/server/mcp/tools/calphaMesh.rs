@@ -844,12 +844,15 @@ impl CalphaMeshClient {
     }
 
     pub async fn download_file_content(&self, url: &str) -> Result<String, CalphaMeshError> {
-        // presigned URL 指向内网对象存储（taskman.fs.skyzcstack.space），
-        // 该存储要求 Authorization 头才可访问，不带头会返回 403。
-        let response = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+        // presigned S3 URL（含 X-Amz-Signature 参数）携带自签名鉴权，
+        // 若同时发送 Bearer Authorization 头，S3 会因双重认证冲突返回 403。
+        // 因此仅对非 presigned URL 追加 Authorization 头。
+        let is_presigned = url.contains("X-Amz-Signature") || url.contains("x-amz-signature");
+        let mut req = self.client.get(url);
+        if !is_presigned {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        let response = req
             .send()
             .await
             .map_err(|e| CalphaMeshError::HttpError(e.to_string()))?;
@@ -881,6 +884,36 @@ fn extract_filename(url: &str) -> String {
         .and_then(|p| p.rsplit('/').next())
         .unwrap_or("unknown")
         .to_string()
+}
+
+/// 从文件列表中找到 output.log，下载后提取关键错误行。
+/// 返回格式：含错误关键词的行（最多 30 行），若无则返回日志末尾 20 行。
+/// 下载失败时返回空字符串。
+async fn fetch_log_excerpt(client: &CalphaMeshClient, file_urls: &[String]) -> String {
+    let log_url = match file_urls.iter().find(|u| extract_filename(u) == "output.log") {
+        Some(u) => u,
+        None => return String::new(),
+    };
+    let log_text = match client.download_file_content(log_url).await {
+        Ok(t) => t,
+        Err(_) => return String::new(),
+    };
+    let lines: Vec<&str> = log_text.lines().collect();
+    // 先尝试提取包含错误关键词的行（最多 30 行）
+    let error_keywords = ["Error", "error", "Traceback", "ZeroDivision", "RuntimeError",
+                          "FileNotFoundError", "failed", "FAILED", "Exception", "Critical"];
+    let error_lines: Vec<&str> = lines
+        .iter()
+        .filter(|l| error_keywords.iter().any(|k| l.contains(k)))
+        .copied()
+        .take(30)
+        .collect();
+    if !error_lines.is_empty() {
+        error_lines.join("\n")
+    } else {
+        // 没有明显错误行，返回末尾 20 行（通常含有失败原因）
+        lines.iter().rev().take(20).copied().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n")
+    }
 }
 
 fn build_files_map(file_urls: &[String]) -> serde_json::Value {
@@ -1324,23 +1357,33 @@ impl Tool for GetTaskResult {
         };
 
         if task.status == "failed" || task.status == "error" {
+            // 尝试获取结果文件中的 output.log，提取错误行辅助诊断
+            let log_excerpt = if let Ok(fr) = client.get_result_files(task.id).await {
+                fetch_log_excerpt(&client, &fr.files).await
+            } else {
+                String::new()
+            };
             let output = json!({
                 "error_code": "task_failed",
                 "task_id": args.task_id,
                 "message": format!("任务计算失败，后端返回 status: {}", task.status),
+                "log_excerpt": log_excerpt,
                 "retryable": false,
-                "details": "请检查 tdb_file 是否包含所有 components 元素，或调整参数后重新提交"
+                "details": "请根据 log_excerpt 中的错误信息检查 tdb_file/components/composition 参数"
             });
             return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
             ));
         }
 
-        // 偶发原因：后端将任务标为 completed 后，结果文件写入/索引可能存在延迟，
-        // 首次 get_result_files 可能返回 []，短时等待后重试可恢复。最多重试 2 次，每次间隔 5 秒。
+        // 后端将任务标为 completed 后，结果文件写入对象存储存在异步延迟（实测 5-25 秒）。
+        // 策略：先等 3 秒让 S3 有时间完成写入，再最多重试 4 次（每次间隔 5 秒），
+        // 合计最多等待 3 + 4×5 = 23 秒，覆盖绝大多数延迟情况。
+        const RESULT_FILES_INITIAL_WAIT_SECS: u64 = 3;
         const RESULT_FILES_RETRY_DELAY_SECS: u64 = 5;
-        const RESULT_FILES_MAX_RETRIES: u32 = 2;
+        const RESULT_FILES_MAX_RETRIES: u32 = 4;
 
+        tokio::time::sleep(std::time::Duration::from_secs(RESULT_FILES_INITIAL_WAIT_SECS)).await;
         let mut file_resp = client.get_result_files(task.id).await?;
         for attempt in 0..=RESULT_FILES_MAX_RETRIES {
             let file_names: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
@@ -1403,27 +1446,19 @@ impl Tool for GetTaskResult {
             || has_thermo_json || has_thermo_csv
             || has_boiling_csv || has_line_csv;
         if !has_actual_result {
-            let log_url = file_resp
-                .files
-                .iter()
-                .find(|u| extract_filename(u) == "output.log")
-                .cloned()
-                .unwrap_or_default();
-            let log_hint = if !log_url.is_empty() {
-                format!(" 日志文件: {}", log_url)
-            } else {
-                String::new()
-            };
             let all_files: Vec<String> = file_resp.files.iter().map(|u| extract_filename(u)).collect();
+            // 尝试下载 output.log，提取关键错误行给下游 Agent 诊断
+            let log_excerpt = fetch_log_excerpt(&client, &file_resp.files).await;
             let output = serde_json::json!({
                 "error_code": "no_result_files",
                 "task_id": args.task_id,
                 "message": format!(
-                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中可能出现错误。{}",
-                    all_files, log_hint
+                    "任务已完成但未生成有效结果文件（实际文件：{:?}），计算过程中可能出现错误。",
+                    all_files
                 ),
+                "log_excerpt": log_excerpt,
                 "retryable": true,
-                "details": "请检查 components/composition/tdb_file 是否正确，或调整参数后重新提交"
+                "details": "请根据 log_excerpt 中的错误信息调整参数后重新提交"
             });
             return Err(CalphaMeshError::ValidationError(
                 serde_json::to_string(&output).unwrap_or_default(),
