@@ -39,16 +39,56 @@ pub struct ErrorResponse {
 /// 用户信息结构
 #[derive(Debug, Deserialize, Serialize, Clone, ToSchema)]
 pub struct UserInfo {
-    /// 用户ID
+    /// 用户ID（兼容 u32 整数和 UUID 字符串两种格式）
+    #[serde(deserialize_with = "deserialize_id_as_u32")]
     pub id: u32,
     /// 用户名
     pub username: String,
-    /// 邮箱
+    /// 邮箱（远程 API 可能返回 null，统一转为空字符串）
+    #[serde(default, deserialize_with = "deserialize_null_as_empty_string")]
     pub email: String,
     /// 订阅级别
     pub subscription_level: String,
     /// 订阅过期时间
     pub subscription_expires_at: Option<String>,
+}
+
+/// 将 null 或缺失的字符串字段反序列化为空字符串
+fn deserialize_null_as_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
+/// 将 id 字段兼容反序列化：支持整数（旧 API）和 UUID 字符串（新 API）
+fn deserialize_id_as_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+
+    struct IdVisitor;
+    impl<'de> Visitor<'de> for IdVisitor {
+        type Value = u32;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "a u32 integer or a UUID/numeric string")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u32, E> {
+            Ok(v as u32)
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u32, E> {
+            Ok(v as u32)
+        }
+        // 新版 API 返回 UUID 字符串，尝试按数字解析，否则映射为 0
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u32, E> {
+            Ok(v.parse::<u32>().unwrap_or(0))
+        }
+    }
+    deserializer.deserialize_any(IdVisitor)
 }
 
 /// API Key信息响应结构

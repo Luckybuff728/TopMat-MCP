@@ -15,21 +15,34 @@ const API_BASE_URL: &str = "https://api.topmaterial-tech.com";
 
 // ═══════════════════════════════════════════════════════════════════
 // TDB 静态映射表（单一维护点，enum 和校验逻辑均从此表派生）
+// 2026-03-12 更新：后端数据库文件已迁移至 TOPDB 格式（.TDB → .TOPDB，前缀 TOPDB-）
 // ═══════════════════════════════════════════════════════════════════
 
 const TDB_ELEMENT_MAP: &[(&str, &[&str])] = &[
+    // Fe 基钢铁合金体系
     (
-        "FE-C-SI-MN-CU-TI-O.TDB",
+        "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB",
         &["FE", "C", "SI", "MN", "CU", "TI", "O"],
     ),
+    // 硼化物/硅化物/氧化物高温陶瓷体系
     (
-        "B-C-SI-ZR-HF-LA-Y-TI-O.TDB",
+        "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB",
         &["B", "C", "SI", "ZR", "HF", "LA", "Y", "TI", "O"],
     ),
-    // AL 基合金 TDB：Al-Si-Mg-Fe-Mn 压铸铝合金体系（含 Fe/Mn 杂质），已在 topthermo-next 后端注册
+    // Al 基压铸铝合金体系（5 元，Al-Si-Mg-Fe-Mn）
     (
-        "Al-Si-Mg-Fe-Mn_by_wf.TDB",
+        "TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB",
         &["AL", "SI", "MG", "FE", "MN"],
+    ),
+    // Al 基多元合金体系（8 元，含 Cr/Cu/Zn）
+    (
+        "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB",
+        &["AL", "CR", "CU", "FE", "MG", "MN", "SI", "ZN"],
+    ),
+    // COST507 修改版 Al 合金数据库（含商用 Al-Cu-Fe-Mg-Mn-Si 等元素）
+    (
+        "TOPDB-cost507_modified.TOPDB",
+        &["AL", "CU", "FE", "MG", "MN", "SI", "CR", "ZN", "NI", "TI"],
     ),
 ];
 
@@ -66,11 +79,13 @@ const AL_BINARY_PHASES: &[&str] = &[
     "LIQUID", "FCC_A1", "DIAMOND_A4",
 ];
 
-/// 多元 Al 任务默认相列表（5 元配方）
+/// 多元 Al 任务默认相列表
 fn tdb_default_phases(tdb_file: &str) -> Vec<&'static str> {
     match tdb_file {
-        "Al-Si-Mg-Fe-Mn_by_wf.TDB" => AL_5ELEMENT_PHASES.to_vec(),
-        // Fe 基和 B 基 TDB 使用全部可用相（["*"] 在这些库中有效）
+        "TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB" => AL_5ELEMENT_PHASES.to_vec(),
+        // 8 元 Al 合金库与 5 元共用同一套 Al 基础相集（不含 Cr/Cu/Zn 特殊相）
+        "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB" => AL_5ELEMENT_PHASES.to_vec(),
+        // Fe 基、B 基、cost507 等其余 TDB 使用全部可用相（["*"]）
         _ => vec!["*"],
     }
 }
@@ -277,7 +292,8 @@ pub struct TaskStatusResponse {
     pub task_type: String,
     pub result: Option<serde_json::Value>,
     pub logs: Option<String>,
-    pub user_id: i32,
+    /// user_id 在新版 API 中返回 UUID 字符串，用 Value 兼容两种格式
+    pub user_id: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -459,7 +475,7 @@ fn default_steps() -> i64 {
     50
 }
 fn default_database() -> String {
-    "FE-C-SI-MN-CU-TI-O.TDB".to_string()
+    "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB".to_string()
 }
 fn default_temperature_step() -> f64 {
     1.0
@@ -654,9 +670,11 @@ impl CalphaMeshClient {
         params: BinaryTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
         // 二元相图：Binary 任务需要顶层 activated_elements 字段（API payload 参考要求）
-        // Al-Si 二元选用 AL_BINARY_PHASES，其他 TDB 使用 ["*"]
+        // Al 基二元选用 AL_BINARY_PHASES，其他 TDB 使用 ["*"]
         let phases: Vec<&str> = match params.tdb_file.as_str() {
-            "Al-Si-Mg-Fe-Mn_by_wf.TDB" => AL_BINARY_PHASES.to_vec(),
+            "TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB"
+            | "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB"
+            | "TOPDB-cost507_modified.TOPDB" => AL_BINARY_PHASES.to_vec(),
             _ => vec!["*"],
         };
         let start_composition = normalize_composition(&params.start_composition)?;
@@ -688,9 +706,11 @@ impl CalphaMeshClient {
         &self,
         params: TernaryTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        // 三元等温截面：Al-Mg-Si 用 AL_TERNARY_PHASES（8相），其他 TDB 用 ["*"]
+        // 三元等温截面：Al 基 TDB 用 AL_TERNARY_PHASES（8相），其他 TDB 用 ["*"]
         let phases: Vec<&str> = match params.tdb_file.as_str() {
-            "Al-Si-Mg-Fe-Mn_by_wf.TDB" => AL_TERNARY_PHASES.to_vec(),
+            "TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB"
+            | "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB"
+            | "TOPDB-cost507_modified.TOPDB" => AL_TERNARY_PHASES.to_vec(),
             _ => vec!["*"],
         };
         let composition_y = normalize_composition(&params.composition_y)?;
@@ -932,8 +952,8 @@ impl Tool for SubmitPointTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。必须包含 components 中所有元素。Al-Si-Mg 压铸铝合金（AL/SI/MG/FE/MN）选 Al-Si-Mg-Fe-Mn_by_wf.TDB；FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB；硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。Al-Si-Mg-Fe-Mn 5元压铸铝合金选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB；含 Cr/Cu/Zn 的多元 Al 合金选 TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB；COST507 商用 Al 合金数据库选 TOPDB-cost507_modified.TOPDB；Fe 基钢铁合金选 TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB；硼化物/硅化物选 TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB。"
                     }
                 },
                 "required": ["components", "composition", "temperature", "tdb_file"],
@@ -1028,8 +1048,8 @@ impl Tool for SubmitLineTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。必须包含 components 中所有元素。Al-Si-Mg 压铸铝合金（AL/SI/MG/FE/MN）选 Al-Si-Mg-Fe-Mn_by_wf.TDB；FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB；硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。Al-Si-Mg-Fe-Mn 5元压铸铝合金选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB；含 Cr/Cu/Zn 的多元 Al 合金选 TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB；COST507 商用 Al 合金数据库选 TOPDB-cost507_modified.TOPDB；Fe 基钢铁合金选 TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB；硼化物/硅化物选 TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB。"
                     }
                 },
                 "required": ["components", "start_composition", "end_composition", "start_temperature", "end_temperature", "steps", "tdb_file"],
@@ -1115,8 +1135,8 @@ impl Tool for SubmitScheilTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。必须包含 components 中所有元素。Al-Si-Mg 压铸铝合金（AL/SI/MG/FE/MN）选 Al-Si-Mg-Fe-Mn_by_wf.TDB；FE 基合金选 FE-C-SI-MN-CU-TI-O.TDB；硼化物/硅化物选 B-C-SI-ZR-HF-LA-Y-TI-O.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。Al-Si-Mg-Fe-Mn 5元压铸铝合金选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB；含 Cr/Cu/Zn 的多元 Al 合金选 TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB；COST507 商用 Al 合金数据库选 TOPDB-cost507_modified.TOPDB；Fe 基钢铁合金选 TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB；硼化物/硅化物选 TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB。"
                     }
                 },
                 "required": ["components", "composition", "start_temperature", "tdb_file"],
@@ -2410,7 +2430,7 @@ impl Tool for SubmitBinaryTask {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "提交二元平衡相图计算任务。在两端点成分之间扫描温度区间，计算 Al-Si 等二元系的平衡相图数据。\n\n任务异步执行（典型耗时 20-60 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**Al-Si 二元相图（推荐用法）**：\n- components=[\"AL\",\"SI\"]，tdb_file=\"Al-Si-Mg-Fe-Mn_by_wf.TDB\"\n- start_composition Al=1/SI=0（纯铝端），end_composition Al=0.7/SI=0.3（30%Si端）\n- temperature_start=500K，temperature_end=1200K".to_string(),
+            description: "提交二元平衡相图计算任务。在两端点成分之间扫描温度区间，计算 Al-Si 等二元系的平衡相图数据。\n\n任务异步执行（典型耗时 20-60 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**Al-Si 二元相图（推荐用法）**：\n- components=[\"AL\",\"SI\"]，tdb_file=\"TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB\"\n- start_composition Al=1/SI=0（纯铝端），end_composition Al=0.7/SI=0.3（30%Si端）\n- temperature_start=500K，temperature_end=1200K".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -2445,8 +2465,8 @@ impl Tool for SubmitBinaryTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。Al-Si 二元相图选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。Al-Si 二元相图选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB。"
                     }
                 },
                 "required": ["components", "start_composition", "end_composition", "start_temperature", "end_temperature", "tdb_file"],
@@ -2498,7 +2518,7 @@ impl Tool for SubmitTernaryTask {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "提交三元等温截面计算任务。在给定温度下计算三元相图（成分三角形），输出相区边界、共轭线（tie-line）和三相三角（tie-triangle）数据，可直接用于 Plotly 可视化。\n\n任务异步执行（典型耗时 30-120 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**Al-Mg-Si 三元截面（推荐用法）**：\n- components=[\"AL\",\"MG\",\"SI\"]，tdb_file=\"Al-Si-Mg-Fe-Mn_by_wf.TDB\"\n- temperature=773K（时效温度附近）\n- 三顶点分别为纯 AL、纯 MG、纯 SI".to_string(),
+            description: "提交三元等温截面计算任务。在给定温度下计算三元相图（成分三角形），输出相区边界、共轭线（tie-line）和三相三角（tie-triangle）数据，可直接用于 Plotly 可视化。\n\n任务异步执行（典型耗时 30-120 秒）。提交后调用 calphamesh_get_task_result 获取结果。\n\n**Al-Mg-Si 三元截面（推荐用法）**：\n- components=[\"AL\",\"MG\",\"SI\"]，tdb_file=\"TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB\"\n- temperature=773K（时效温度附近）\n- 三顶点分别为纯 AL、纯 MG、纯 SI".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -2532,8 +2552,8 @@ impl Tool for SubmitTernaryTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。Al-Mg-Si 三元相图选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。Al-Mg-Si 三元相图选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB。"
                     }
                 },
                 "required": ["components", "temperature", "composition_y", "composition_x", "composition_o", "tdb_file"],
@@ -2614,8 +2634,8 @@ impl Tool for SubmitBoilingPointTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。纯 Al 的沸点/熔点选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。纯 Al 的沸点/熔点选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB。"
                     }
                 },
                 "required": ["components", "composition", "pressure", "temperature_range", "tdb_file"],
@@ -2725,8 +2745,8 @@ impl Tool for SubmitThermoPropertiesTask {
                     },
                     "tdb_file": {
                         "type": "string",
-                        "enum": ["FE-C-SI-MN-CU-TI-O.TDB", "B-C-SI-ZR-HF-LA-Y-TI-O.TDB", "Al-Si-Mg-Fe-Mn_by_wf.TDB"],
-                        "description": "热力学数据库文件名。Al 合金热力学性质选 Al-Si-Mg-Fe-Mn_by_wf.TDB。"
+                        "enum": ["TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB", "TOPDB-Al-Cr-Cu-Fe-Mg-Mn-Si-Zn.TOPDB", "TOPDB-cost507_modified.TOPDB", "TOPDB-Fe-C-Si-Mn-Cu-Ti-O.TOPDB", "TOPDB-B-C-Si-Zr-Hf-La-Y-Ti-O.TOPDB"],
+                        "description": "热力学数据库文件名（TOPDB 格式）。Al 合金热力学性质选 TOPDB-Al-Si-Mg-Fe-Mn_by_wf.TOPDB。"
                     }
                 },
                 "required": ["components", "composition", "temperature_start", "temperature_end", "increments", "pressure_start", "pressure_end", "pressure_increments", "properties", "tdb_file"],
