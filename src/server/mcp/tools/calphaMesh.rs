@@ -164,6 +164,59 @@ fn validate_composition_sum(composition: &HashMap<String, f64>) -> Result<(), Ca
     normalize_composition(composition).map(|_| ())
 }
 
+/// 过滤 composition=0.0 的组元，同步更新 components 列表，然后重新归一化。
+/// 例如：LLM 给出 MN=0.0 时，自动将其从计算体系中移除，避免后端静默失败（返回空 phases）。
+/// 返回：(清洗后的 components, 归一化后的 composition)
+fn sanitize_composition_and_components(
+    components: &[String],
+    composition: &HashMap<String, f64>,
+) -> Result<(Vec<String>, HashMap<String, f64>), CalphaMeshError> {
+    // 过滤掉值为 0（或负数）的组元
+    let filtered: HashMap<String, f64> = composition
+        .iter()
+        .filter(|(_, v)| **v > 0.0)
+        .map(|(k, v)| (k.clone(), *v))
+        .collect();
+
+    if filtered.is_empty() {
+        return Err(CalphaMeshError::ValidationError(
+            "所有组元的摩尔分数均为 0，无法进行计算。请检查 composition 参数。".to_string(),
+        ));
+    }
+
+    let removed: Vec<&str> = components
+        .iter()
+        .filter(|c| {
+            composition.get(*c).copied().unwrap_or(0.0) <= 0.0
+        })
+        .map(|s| s.as_str())
+        .collect();
+
+    // 更新 components 列表（保持原始顺序，移除 0.0 成分的元素）
+    let new_components: Vec<String> = components
+        .iter()
+        .filter(|c| filtered.contains_key(*c))
+        .cloned()
+        .collect();
+
+    // 归一化
+    let sum: f64 = filtered.values().sum();
+    let normalized: HashMap<String, f64> = filtered
+        .into_iter()
+        .map(|(k, v)| (k, v / sum))
+        .collect();
+
+    if !removed.is_empty() {
+        tracing::warn!(
+            "sanitize: 已自动移除 composition=0 的组元 {:?}，实际计算体系: {:?}",
+            removed,
+            new_components
+        );
+    }
+
+    Ok((new_components, normalized))
+}
+
 fn validate_components_match_composition(
     components: &[String],
     composition: &HashMap<String, f64>,
@@ -586,14 +639,16 @@ impl CalphaMeshClient {
         params: PointTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
         let phases = tdb_default_phases(&params.tdb_file);
-        let composition = normalize_composition(&params.composition)?;
+        // sanitize 先过滤 0.0 成分，再归一化，避免 MN=0.0 等情况触发后端静默失败
+        let (components, composition) =
+            sanitize_composition_and_components(&params.components, &params.composition)?;
         let inner = json!({
             "task_type": "point_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
             "task_name": format!("point_{}", chrono::Utc::now().timestamp()),
             "task_path": Self::generate_task_path("point"),
             "condition": {
-                "components": params.components,
+                "components": components,
                 "activated_phases": phases,
                 "temperature": params.temperature,
                 "compositions": composition
@@ -612,15 +667,19 @@ impl CalphaMeshClient {
         params: LineTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
         let phases = tdb_default_phases(&params.tdb_file);
-        let start_composition = normalize_composition(&params.start_composition)?;
-        let end_composition = normalize_composition(&params.end_composition)?;
+        // sanitize：过滤 0.0 成分并归一化；以 start_composition 为准确定最终 components
+        let (components, start_composition) =
+            sanitize_composition_and_components(&params.components, &params.start_composition)?;
+        // end_composition 使用同一套 components 进行 sanitize（对温度扫描 start==end 时也适用）
+        let (_, end_composition) =
+            sanitize_composition_and_components(&components, &params.end_composition)?;
         let inner = json!({
             "task_type": "line_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
             "task_name": format!("line_{}", chrono::Utc::now().timestamp()),
             "task_path": Self::generate_task_path("line"),
             "condition": {
-                "components": params.components,
+                "components": components,
                 "compositions_start": start_composition,
                 "compositions_end": end_composition,
                 "temperature_start": params.start_temperature,
@@ -642,14 +701,15 @@ impl CalphaMeshClient {
         params: ScheilTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
         let phases = tdb_default_phases(&params.tdb_file);
-        let composition = normalize_composition(&params.composition)?;
+        let (components, composition) =
+            sanitize_composition_and_components(&params.components, &params.composition)?;
         let inner = json!({
             "task_type": "scheil_solidification",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
             "task_name": format!("scheil_{}", chrono::Utc::now().timestamp()),
             "task_path": Self::generate_task_path("scheil"),
             "condition": {
-                "components": params.components,
+                "components": components,
                 "compositions": composition,
                 "start_temperature": params.start_temperature,
                 "temperature_step": params.temperature_step,
@@ -769,14 +829,15 @@ impl CalphaMeshClient {
     ) -> Result<TaskResponse, CalphaMeshError> {
         // 热力学性质任务使用与 point/line 相同的 5 元相集合
         let phases = tdb_default_phases(&params.tdb_file);
-        let composition = normalize_composition(&params.composition)?;
+        let (components, composition) =
+            sanitize_composition_and_components(&params.components, &params.composition)?;
         let inner = json!({
             "task_type": "thermodynamic_properties",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
             "task_name": format!("properties_{}", chrono::Utc::now().timestamp()),
             "task_path": Self::generate_task_path("properties"),
             "condition": {
-                "components": params.components,
+                "components": components,
                 "activated_phases": phases,
                 "compositions_start": composition,
                 "compositions_end": composition,
@@ -1545,6 +1606,25 @@ impl GetTaskResult {
             .and_then(|pf| pf.as_object())
             .map(|obj| obj.len())
             .unwrap_or(0);
+
+        // 检测静默失败：phases 为空且 phase_fractions 为空，说明后端未能完成计算
+        // 常见原因：某组元 composition=0（已应被 sanitize 过滤，此处作为兜底检测）
+        if dominant_phase.is_empty() && phase_count == 0 {
+            // 尝试下载 output.log 获取具体失败原因
+            let log_excerpt = fetch_log_excerpt(client, file_urls).await;
+            let output = serde_json::json!({
+                "error_code": "empty_result",
+                "message": "point_calculation 任务已完成，但返回的 phases 为空、phase_fractions 为空。\
+                            后端计算可能因参数问题静默失败（如某组元 composition=0 或温度超出相稳定区间）。",
+                "log_excerpt": log_excerpt,
+                "retryable": true,
+                "details": "请检查：1) composition 中所有元素的值均 > 0；\
+                            2) temperature 在该成分的固相线-液相线范围内（推荐 500-1100 K）"
+            });
+            return Err(CalphaMeshError::ValidationError(
+                serde_json::to_string(&output).unwrap_or_default(),
+            ));
+        }
 
         let mut result_with_metrics = result_data.clone();
         if let Some(obj) = result_with_metrics.as_object_mut() {
