@@ -90,6 +90,54 @@ fn tdb_default_phases(tdb_file: &str) -> Vec<&'static str> {
     }
 }
 
+/// 根据实际参与计算的 components 过滤激活相列表，移除含有缺失元素的相。
+///
+/// 背景：AL_5ELEMENT_PHASES 包含 ALPHA_ALFEMNSI / AL4_FEMN 等需要 MN 参与的相。
+/// 若 MN 不在 components 中（合金不含锰），这些相在温度扫描时会引发 ZeroDivisionError。
+/// 此函数在 sanitize 后、构建 payload 前调用，确保相列表与组分严格一致。
+fn filter_phases_for_components<'a>(
+    phases: &[&'a str],
+    components: &[String],
+) -> Vec<&'a str> {
+    // 各相名称片段 → 所依赖的额外元素（AL 为基体，不列入）
+    // 仅列出在 AL_5ELEMENT_PHASES 中存在的 MN/FE 依赖相
+    const PHASE_ELEMENT_DEPS: &[(&str, &[&str])] = &[
+        ("ALPHA_ALFEMNSI", &["MN", "FE"]),
+        ("AL4_FEMN",       &["MN", "FE"]),
+        ("AL5FE2",         &["FE"]),
+        ("AL13FE4",        &["FE"]),
+        ("ALPHA_ALFESI",   &["FE"]),
+        ("BETA_ALFESI",    &["FE"]),
+        ("BETA_ALMG",      &["MG"]),
+        ("EPSILON_ALMG",   &["MG"]),
+        ("GAMMA_ALMG",     &["MG"]),
+        ("MG2SI",          &["MG", "SI"]),
+        ("CBCC_A12",       &["MN"]),
+        ("BCC_A2",         &["FE", "MN"]),
+    ];
+
+    let comp_upper: Vec<String> = components.iter().map(|s| s.to_uppercase()).collect();
+
+    phases
+        .iter()
+        .filter(|&&phase| {
+            // 对通配符 "*" 直接保留
+            if phase == "*" {
+                return true;
+            }
+            // 查找该相的元素依赖；未在映射表中的相（LIQUID/FCC_A1 等基础相）直接保留
+            let deps = PHASE_ELEMENT_DEPS
+                .iter()
+                .find(|(name, _)| *name == phase)
+                .map(|(_, deps)| *deps)
+                .unwrap_or(&[]);
+            // 依赖的所有元素都在 components 中才保留此相
+            deps.iter().all(|req| comp_upper.contains(&req.to_string()))
+        })
+        .copied()
+        .collect()
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 错误类型
 // ═══════════════════════════════════════════════════════════════════
@@ -638,10 +686,9 @@ impl CalphaMeshClient {
         &self,
         params: PointTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        let phases = tdb_default_phases(&params.tdb_file);
-        // sanitize 先过滤 0.0 成分，再归一化，避免 MN=0.0 等情况触发后端静默失败
         let (components, composition) =
             sanitize_composition_and_components(&params.components, &params.composition)?;
+        let phases = filter_phases_for_components(&tdb_default_phases(&params.tdb_file), &components);
         let inner = json!({
             "task_type": "point_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -666,13 +713,11 @@ impl CalphaMeshClient {
         &self,
         params: LineTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        let phases = tdb_default_phases(&params.tdb_file);
-        // sanitize：过滤 0.0 成分并归一化；以 start_composition 为准确定最终 components
         let (components, start_composition) =
             sanitize_composition_and_components(&params.components, &params.start_composition)?;
-        // end_composition 使用同一套 components 进行 sanitize（对温度扫描 start==end 时也适用）
         let (_, end_composition) =
             sanitize_composition_and_components(&components, &params.end_composition)?;
+        let phases = filter_phases_for_components(&tdb_default_phases(&params.tdb_file), &components);
         let inner = json!({
             "task_type": "line_calculation",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -700,9 +745,9 @@ impl CalphaMeshClient {
         &self,
         params: ScheilTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        let phases = tdb_default_phases(&params.tdb_file);
         let (components, composition) =
             sanitize_composition_and_components(&params.components, &params.composition)?;
+        let phases = filter_phases_for_components(&tdb_default_phases(&params.tdb_file), &components);
         let inner = json!({
             "task_type": "scheil_solidification",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
@@ -827,10 +872,9 @@ impl CalphaMeshClient {
         &self,
         params: ThermoPropertiesParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        // 热力学性质任务使用与 point/line 相同的 5 元相集合
-        let phases = tdb_default_phases(&params.tdb_file);
         let (components, composition) =
             sanitize_composition_and_components(&params.components, &params.composition)?;
+        let phases = filter_phases_for_components(&tdb_default_phases(&params.tdb_file), &components);
         let inner = json!({
             "task_type": "thermodynamic_properties",
             "tdb_file": format!("/app/exe/topthermo-next/database/{}", params.tdb_file),
