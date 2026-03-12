@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
+use tracing::warn;
 
 use rig::{completion::ToolDefinition, tool::Tool};
 
@@ -192,6 +193,43 @@ fn validate_components_match_composition(
         )));
     }
     Ok(())
+}
+
+/// 自动补全 TDB 所需但缺失的元素：
+/// - 在 components 中添加缺失元素
+/// - 在 composition 中为缺失元素设置 MIN_TRACE (1e-4)
+/// - 重新归一化使总和严格为 1.0
+/// 仅对非 binary/ternary 多元任务调用（binary/ternary 只用部分元素是合法的）
+fn auto_complete_tdb_elements(
+    tdb_file: &str,
+    components: &mut Vec<String>,
+    composition: &mut HashMap<String, f64>,
+) {
+    const MIN_TRACE: f64 = 1e-4;
+    if let Some(required) = tdb_elements(tdb_file) {
+        let mut added = false;
+        for &elem in required {
+            let elem_str = elem.to_string();
+            if !components.contains(&elem_str) {
+                warn!(
+                    "TDB {} 需要元素 {} 但未提供，自动补入 {}={}",
+                    tdb_file, elem, elem, MIN_TRACE
+                );
+                components.push(elem_str.clone());
+                composition.insert(elem_str, MIN_TRACE);
+                added = true;
+            }
+        }
+        if added {
+            // 重新归一化
+            let sum: f64 = composition.values().sum();
+            if sum > 0.0 {
+                for v in composition.values_mut() {
+                    *v /= sum;
+                }
+            }
+        }
+    }
 }
 
 fn validate_tdb_contains_elements(
@@ -595,8 +633,9 @@ impl CalphaMeshClient {
 
     pub async fn submit_point_task(
         &self,
-        params: PointTaskParams,
+        mut params: PointTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.composition);
         let phases = tdb_default_phases(&params.tdb_file);
         let composition = normalize_composition(&params.composition)?;
         let inner = json!({
@@ -621,8 +660,15 @@ impl CalphaMeshClient {
 
     pub async fn submit_line_task(
         &self,
-        params: LineTaskParams,
+        mut params: LineTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.start_composition);
+        // end_composition 也需要同步补全相同元素
+        for elem in params.components.clone() {
+            if !params.end_composition.contains_key(&elem) {
+                params.end_composition.insert(elem, 1e-4);
+            }
+        }
         let phases = tdb_default_phases(&params.tdb_file);
         let start_composition = normalize_composition(&params.start_composition)?;
         let end_composition = normalize_composition(&params.end_composition)?;
@@ -651,8 +697,9 @@ impl CalphaMeshClient {
 
     pub async fn submit_scheil_task(
         &self,
-        params: ScheilTaskParams,
+        mut params: ScheilTaskParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
+        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.composition);
         let phases = tdb_default_phases(&params.tdb_file);
         let composition = normalize_composition(&params.composition)?;
         let inner = json!({
@@ -777,9 +824,9 @@ impl CalphaMeshClient {
 
     pub async fn submit_thermo_properties_task(
         &self,
-        params: ThermoPropertiesParams,
+        mut params: ThermoPropertiesParams,
     ) -> Result<TaskResponse, CalphaMeshError> {
-        // 热力学性质任务使用与 point/line 相同的 5 元相集合
+        auto_complete_tdb_elements(&params.tdb_file, &mut params.components, &mut params.composition);
         let phases = tdb_default_phases(&params.tdb_file);
         let composition = normalize_composition(&params.composition)?;
         let inner = json!({
